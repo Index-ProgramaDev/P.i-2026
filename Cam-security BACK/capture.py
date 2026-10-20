@@ -1,15 +1,19 @@
-import cv2
 import os
 import time
 import yaml
 import logging
 import threading
+import cv2
 
 logger = logging.getLogger("camsecurity.capture")
 
 
 class CameraCapture:
-    """Captura frames de câmera ou arquivo de vídeo em thread dedicada."""
+    """Captura frames de câmera USB, arquivo local ou stream de rede (RTSP/HTTP).
+
+    Possui mecanismo avançado de auto-reconexão com Exponential Backoff
+    para lidar com quedas de sinal de câmeras IP e reconexões resilientes.
+    """
 
     def __init__(self, config_path="config.yaml", shared_state=None, video_buffer=None):
         self.width, self.height, self.fps = 640, 480, 30
@@ -18,6 +22,7 @@ class CameraCapture:
         self.cap = None
         self.source = None
         self.is_video = False
+        self.is_network_stream = False
         self.running = False
         self.frame = None
         self.frame_seq = 0
@@ -26,6 +31,14 @@ class CameraCapture:
         self.thread = None
         self.shared_state = shared_state
         self.video_buffer = video_buffer
+
+        # Parâmetros de reconexão exponencial (Backoff)
+        self.reconnect_base_delay = 1.0     # 1 segundo inicial
+        self.reconnect_max_delay = 30.0     # teto de 30 segundos
+        self.reconnect_factor = 2.0         # dobra a cada tentativa
+        self.consecutive_failures = 0
+        self.max_frame_timeout_sec = 5.0    # timeout sem frames para considerar queda
+
         self._load_config()
 
     def _load_config(self):
@@ -39,19 +52,47 @@ class CameraCapture:
         except Exception as e:
             logger.error("Erro ao carregar config: %s", e)
 
-    def start(self):
-        if self.running:
-            return
+    def _determine_source(self):
+        if self.video_path and (os.path.exists(self.video_path) or self._is_url(self.video_path)):
+            return self.video_path
+        return self.camera_id
 
-        self.is_video = bool(self.video_path and os.path.exists(self.video_path)) or (
-            isinstance(self.camera_id, str) and os.path.exists(self.camera_id)
+    @staticmethod
+    def _is_url(path: any) -> bool:
+        if isinstance(path, str):
+            lower = path.lower()
+            return lower.startswith(("rtsp://", "http://", "https://", "rtmp://"))
+        return False
+
+    def _open_capture(self) -> bool:
+        """Tenta abrir a fonte de captura."""
+        if self.cap:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+            self.cap = None
+
+        self.source = self._determine_source()
+        self.is_network_stream = self._is_url(self.source)
+        self.is_video = bool(
+            not self.is_network_stream
+            and (
+                (self.video_path and os.path.exists(self.video_path))
+                or (isinstance(self.source, str) and os.path.exists(self.source))
+            )
         )
-        self.source = (self.video_path if self.video_path and os.path.exists(self.video_path)
-                       else self.camera_id)
 
-        self.cap = cv2.VideoCapture(self.source)
+        logger.info("Tentando abrir fonte: %s (stream_rede=%s, arquivo=%s)",
+                    self.source, self.is_network_stream, self.is_video)
 
-        # Tenta outras câmeras se a configurada falhar
+        try:
+            self.cap = cv2.VideoCapture(self.source)
+        except Exception as e:
+            logger.error("Exceção ao instanciar VideoCapture: %s", e)
+            return False
+
+        # Fallback para câmeras locais USB se configurado ID numérico que falhou
         if not self.cap.isOpened() and not isinstance(self.source, str):
             for cid in range(4):
                 if cid == self.camera_id:
@@ -60,10 +101,12 @@ class CameraCapture:
                 self.cap = cv2.VideoCapture(cid)
                 if self.cap.isOpened():
                     self.camera_id = self.source = cid
+                    logger.info("Conectado na câmera alternativa ID: %d", cid)
                     break
 
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Não foi possível abrir a fonte: {self.source}")
+        if not self.cap or not self.cap.isOpened():
+            logger.warning("Falha ao abrir VideoCapture para fonte: %s", self.source)
+            return False
 
         if self.is_video:
             real_fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -74,10 +117,22 @@ class CameraCapture:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
         self.frame_interval = 1 / max(self.fps, 1)
+        return True
+
+    def start(self):
+        if self.running:
+            return
+
+        success = self._open_capture()
+        if not success:
+            if not self.is_network_stream and not self.is_video:
+                raise RuntimeError(f"Não foi possível abrir a fonte: {self.source}")
+            logger.warning("Fonte inicial indisponível. Iniciando thread com auto-reconexão...")
+
         self.running = True
-        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="cam-capture")
         self.thread.start()
-        logger.info("Fonte iniciada: %s", self.source)
+        logger.info("Captura iniciada (running=True).")
 
     @property
     def real_fps(self) -> float:
@@ -85,24 +140,61 @@ class CameraCapture:
 
     def _loop(self):
         next_frame = time.perf_counter()
+        last_successful_frame_time = time.perf_counter()
+
         while self.running:
+            # Caso a captura esteja fechada, aciona reconexão com Exponential Backoff
+            if not self.cap or not self.cap.isOpened():
+                self._handle_reconnect()
+                last_successful_frame_time = time.perf_counter()
+                continue
+
             if self.is_video:
                 delay = next_frame - time.perf_counter()
                 if delay > 0:
                     time.sleep(delay)
 
-            ret, frame = self.cap.read() if self.cap else (False, None)
+            ret, frame = False, None
+            try:
+                ret, frame = self.cap.read()
+            except Exception as e:
+                logger.warning("Exceção ao ler frame: %s", e)
+                ret, frame = False, None
+
+            now = time.perf_counter()
+
             if not ret or frame is None:
                 if self.is_video:
-                    # Reinicia o vídeo ao terminar
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    # Reinicia o vídeo ao chegar no fim
+                    try:
+                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    except Exception:
+                        pass
                     next_frame = time.perf_counter()
+                    continue
+
+                # Câmera física ou RTSP: verifica se excedeu timeout sem frames
+                if now - last_successful_frame_time > self.max_frame_timeout_sec:
+                    logger.warning("Timeout (%.1fs) sem receber frames da fonte. Disparando reconexão...",
+                                   self.max_frame_timeout_sec)
+                    self._handle_reconnect()
+                    last_successful_frame_time = time.perf_counter()
                 else:
                     time.sleep(0.01)
                 continue
 
-            frame = cv2.resize(frame, (self.width, self.height))
-            now = time.perf_counter()
+            # Frame lido com sucesso: reseta contador de falhas
+            last_successful_frame_time = now
+            if self.consecutive_failures > 0:
+                logger.info("Stream restabelecida com sucesso após falhas!")
+                self.consecutive_failures = 0
+
+            try:
+                if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                    frame = cv2.resize(frame, (self.width, self.height))
+            except Exception as e:
+                logger.error("Erro ao redimensionar frame: %s", e)
+                continue
 
             with self.lock:
                 self.frame = frame
@@ -119,6 +211,35 @@ class CameraCapture:
                 if next_frame < time.perf_counter():
                     next_frame = time.perf_counter()
 
+    def _handle_reconnect(self):
+        """Executa reconexão com Exponential Backoff."""
+        self.consecutive_failures += 1
+        # delay = min(base * (factor ** (failures - 1)), max_delay)
+        delay = min(
+            self.reconnect_base_delay * (self.reconnect_factor ** (self.consecutive_failures - 1)),
+            self.reconnect_max_delay,
+        )
+
+        logger.warning(
+            "Conexão perdida com a câmera. Tentativa #%d de reconexão em %.1f segundos...",
+            self.consecutive_failures, delay
+        )
+
+        # Espera com checagem de self.running para não bloquear shutdown
+        start_wait = time.perf_counter()
+        while self.running and (time.perf_counter() - start_wait < delay):
+            time.sleep(0.1)
+
+        if not self.running:
+            return
+
+        ok = self._open_capture()
+        if ok:
+            logger.info("Reconexão bem-sucedida com a fonte: %s!", self.source)
+            self.consecutive_failures = 0
+        else:
+            logger.warning("Falha na tentativa #%d de reconexão.", self.consecutive_failures)
+
     def get_frame(self, return_meta=False):
         with self.lock:
             frame = self.frame.copy() if self.frame is not None else None
@@ -130,6 +251,9 @@ class CameraCapture:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2)
         if self.cap:
-            self.cap.release()
+            try:
+                self.cap.release()
+            except Exception:
+                pass
             self.cap = None
         logger.info("Câmera encerrada.")

@@ -46,13 +46,22 @@ class StorageManager:
         self._video_buffer = None
         self._log_lock = threading.Lock()
 
+        # Integração opcional com PostgreSQL Neon
+        try:
+            from database import NeonDatabase
+            self._db = NeonDatabase()
+        except Exception as e:
+            logger.warning("Falha ao inicializar NeonDatabase no StorageManager: %s", e)
+            self._db = None
+
         self._events_dir.mkdir(parents=True, exist_ok=True)
         if self._log_path.exists():
             with open(self._log_path, encoding="utf-8") as f:
                 self._event_count = sum(1 for _ in f)
 
-        logger.info("StorageManager pronto — raiz=%s  eventos=%d  vídeo=%ds pre + %ds post  formato=%s (%s)",
-                    root, self._event_count, int(self._pre_sec), int(self._post_sec), self._vid_fmt, self._vid_codec)
+        logger.info("StorageManager pronto — raiz=%s  eventos=%d  vídeo=%ds pre + %ds post  formato=%s (%s)  db_neon=%s",
+                    root, self._event_count, int(self._pre_sec), int(self._post_sec), self._vid_fmt, self._vid_codec,
+                    bool(self._db and self._db.is_enabled()))
 
     def set_video_buffer(self, video_buffer) -> None:
         self._video_buffer = video_buffer
@@ -105,6 +114,23 @@ class StorageManager:
             self._rotate_if_needed()
             with open(self._log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")
+
+            # Persiste no Neon PostgreSQL
+            if self._db and self._db.is_enabled():
+                try:
+                    self._db.insert_event(
+                        event_id=seq_str,
+                        kind=event.kind.name,
+                        timestamp=record["timestamp"],
+                        frame_seq=event.frame_seq,
+                        ucf_score=event.ucf_score,
+                        detections=event.yolo_summary,
+                        frame_path=frame_rel,
+                        video_path=None,
+                        metadata={"source": "camsecurity"},
+                    )
+                except Exception as e:
+                    logger.error("Falha ao salvar evento no Neon: %s", e)
 
             self._event_count += 1
             logger.info("Evento salvo: %s  tipo=%s  score=%.3f", seq_str, event.kind.name, event.ucf_score)
@@ -180,6 +206,12 @@ class StorageManager:
                 logger.info("JSONL atualizado: evento %s → %s", event_id, video_rel)
             except Exception:
                 logger.exception("Falha ao atualizar JSONL para evento %s", event_id)
+
+            if self._db and self._db.is_enabled():
+                try:
+                    self._db.update_video_path(event_id, video_rel)
+                except Exception as e:
+                    logger.error("Falha ao atualizar video_path no Neon para evento %s: %s", event_id, e)
 
     def _rotate_if_needed(self) -> None:
         """Rotaciona o JSONL quando ultrapassa o limite de eventos."""

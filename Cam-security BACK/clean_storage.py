@@ -71,6 +71,16 @@ def clean_storage(interactive: bool = True):
         except Exception as e:
             print(f"[ERRO] Falha ao remover '{events_bak}': {e}")
 
+    # Limpar banco Neon se configurado
+    try:
+        from database import NeonDatabase
+        db = NeonDatabase()
+        if db.is_enabled():
+            db.clear_all_events()
+            print("[OK] Tabela 'security_events' no Neon PostgreSQL limpa com sucesso.")
+    except Exception as e:
+        print(f"[AVISO] Não foi possível limpar tabela no Neon: {e}")
+
     print("\n[SUCESSO] Storage e histórico limpos com sucesso!")
 
 

@@ -166,7 +166,18 @@ def _ai_thread(shared_state, processor, events, ucf_enabled):
     logger.info("Thread de IA encerrada")
 
 
-def run(config: dict, display: bool = True, config_path: str = "config.yaml"):
+def run(
+    config: dict,
+    display: bool = True,
+    config_path: str = "config.yaml",
+    enable_server: bool = True,
+    server_host: str = "0.0.0.0",
+    server_port: int = 8000,
+):
+    import uvicorn
+    from server import CamSecurityServer
+    from database import NeonDatabase
+
     ucf_enabled = config.get("ucf", {}).get("enabled", True)
     vid_cfg = config.get("video", {})
     pre_sec = float(vid_cfg.get("pre_event_seconds", 5))
@@ -180,6 +191,38 @@ def run(config: dict, display: bool = True, config_path: str = "config.yaml"):
     events = EventManager(config)
     storage = StorageManager(config)
 
+    # Neon Database
+    db = NeonDatabase()
+
+    # Servidor Web / API REST / WebSocket / Streaming
+    server = None
+    uvi_server = None
+    if enable_server:
+        server = CamSecurityServer(
+            shared_state=state,
+            processor=processor,
+            storage_manager=storage,
+            db=db,
+            config=config,
+        )
+
+        def _run_uvicorn():
+            uvi_config = uvicorn.Config(
+                server.app,
+                host=server_host,
+                port=server_port,
+                log_level="warning",
+                access_log=False,
+            )
+            nonlocal uvi_server
+            uvi_server = uvicorn.Server(uvi_config)
+            uvi_server.run()
+
+        server_thread = threading.Thread(target=_run_uvicorn, daemon=True, name="cam-webserver")
+        server_thread.start()
+        logger.info("API REST & Streaming rodando em http://%s:%d (Docs: /docs, Stream: /stream)",
+                    "127.0.0.1" if server_host == "0.0.0.0" else server_host, server_port)
+
     storage.set_video_buffer(buf)
     events.on_event(storage.save_event)
     events.set_storage_manager(storage)
@@ -189,6 +232,14 @@ def run(config: dict, display: bool = True, config_path: str = "config.yaml"):
             ids = [d.track_id for d in event.yolo_detections if d.track_id is not None]
             if ids:
                 processor.mark_suspects(ids)
+        if server:
+            server.broadcast_event({
+                "type": "ALERT",
+                "kind": event.kind.name,
+                "timestamp": event.timestamp,
+                "score": float(event.ucf_score),
+                "detections": event.yolo_summary,
+            })
 
     events.on_event(_on_confirmado)
 
@@ -217,7 +268,7 @@ def run(config: dict, display: bool = True, config_path: str = "config.yaml"):
                           args=(state, processor, events, ucf_enabled), daemon=True)
     ai.start()
 
-    logger.info("CamSecurity rodando. Pressione Q para sair.")
+    logger.info("CamSecurity rodando. Pressione Q na janela ou CTRL+C para sair.")
     loop_start = time.perf_counter()
 
     if display:
@@ -251,6 +302,8 @@ def run(config: dict, display: bool = True, config_path: str = "config.yaml"):
         state.shutdown()
     finally:
         state.shutdown()
+        if uvi_server:
+            uvi_server.should_exit = True
         if ai.is_alive():
             ai.join(timeout=2.0)
         processor.stop()
@@ -267,8 +320,18 @@ def main():
     parser = argparse.ArgumentParser(description="CamSecurity backend")
     parser.add_argument("--config", default="config.yaml", help="Caminho para o config (padrão: config.yaml)")
     parser.add_argument("--no-display", action="store_true", help="Roda sem janela OpenCV")
+    parser.add_argument("--no-server", action="store_true", help="Desativa o servidor FastAPI/WebSocket")
+    parser.add_argument("--port", type=int, default=8000, help="Porta do servidor Web (padrão: 8000)")
+    parser.add_argument("--host", default="0.0.0.0", help="Host do servidor Web (padrão: 0.0.0.0)")
     args = parser.parse_args()
-    run(load_config(args.config), display=not args.no_display, config_path=args.config)
+    run(
+        load_config(args.config),
+        display=not args.no_display,
+        config_path=args.config,
+        enable_server=not args.no_server,
+        server_host=args.host,
+        server_port=args.port,
+    )
 
 
 if __name__ == "__main__":
