@@ -8,15 +8,16 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Modelos de IA (grandes demais para git)
+# Modelos de IA e execuções
+models/
+runs/
 *.pt
 *.pth
 *.onnx
 
-# Evidências e armazenamento
+# Evidências e vídeos locais
 storage/
-
-# Vídeos de teste
+video/
 *.mp4
 *.avi
 *.gif

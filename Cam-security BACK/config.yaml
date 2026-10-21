@@ -1,5 +1,5 @@
 # ── Fonte de vídeo ────────────────────────────────────────────────────────────
-video_path: "./mercado.mp4"  # deixe vazio para usar câmera ao vivo
+video_path: ""  # Vazio para usar a câmera real ao vivo (webcam)
 camera_id:  0
 width:       640
 height:      480
@@ -7,7 +7,7 @@ fps:         30
 
 # ── Detecção de objetos (YOLO) ────────────────────────────────────────────────
 ai:
-  yolo_model_path: "yolo11n.pt"
+  yolo_model_path: "models/yolo11n.pt"
   yolo_conf: 0.25              # benchmark: +30% detecções vs. 0.35 sem aumentar máximo
   yolo_classes: [0]            # 0 = pessoa (COCO)
   device: "cpu"
@@ -43,5 +43,5 @@ video:
   pre_event_seconds:  5
   post_event_seconds: 15
   fps:   30
-  codec: "mp4v"
+  codec: "avc1"  # H.264 - compatível com navegadores
   format: "mp4"

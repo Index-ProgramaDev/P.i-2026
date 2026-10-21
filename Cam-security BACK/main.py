@@ -15,11 +15,13 @@ from storage import StorageManager
 from video_buffer import VideoBuffer
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
+# Logger principal em INFO, outros em WARNING
+logging.getLogger("camsecurity.main").setLevel(logging.INFO)
 logger = logging.getLogger("camsecurity.main")
 
 
@@ -112,7 +114,7 @@ def load_config(path: str = "config.yaml") -> dict:
 
 def _ai_thread(shared_state, processor, events, ucf_enabled):
     """Thread de inferência — processa frames sem bloquear a exibição."""
-    LAG_WARN_MS = 200
+    LAG_WARN_MS = 500  # Aumentado para reduzir logs
     last_seq = -1
     inf_frames = 0
     inf_start = time.perf_counter()
@@ -131,7 +133,7 @@ def _ai_thread(shared_state, processor, events, ucf_enabled):
 
         lag_ms = (time.perf_counter() - captured_at) * 1000
         if lag_ms > LAG_WARN_MS:
-            logger.warning("IA atrasada: frame=%d  %.0fms — aumente clip_stride ou reduza imgsz", seq, lag_ms)
+            logger.warning("IA atrasada: frame=%d  %.0fms", seq, lag_ms)
 
         last_seq = seq
 
@@ -150,14 +152,14 @@ def _ai_thread(shared_state, processor, events, ucf_enabled):
             events.process(result)
             inf_frames += 1
         except Exception as e:
-            logger.error("Erro na IA: %s", e, exc_info=True)
+            logger.error("Erro na IA: %s", e, exc_info=False)
             time.sleep(0.1)
 
         now = time.perf_counter()
-        if now - last_log >= 5.0:
+        if now - last_log >= 10.0:  # Log a cada 10s ao invés de 5s
             inf_fps = inf_frames / (now - inf_start) if now > inf_start else 0
             fps = shared_state.get_fps_stats()
-            logger.info("FPS | Captura: %.1f | Inferência: %.1f | Exibição: %.1f",
+            logger.info("FPS | Cap: %.1f | IA: %.1f | Display: %.1f",
                         fps["capture"], inf_fps, fps["display"])
             inf_frames = 0
             inf_start = now
@@ -168,7 +170,7 @@ def _ai_thread(shared_state, processor, events, ucf_enabled):
 
 def run(
     config: dict,
-    display: bool = True,
+    display: bool = False,
     config_path: str = "config.yaml",
     enable_server: bool = True,
     server_host: str = "0.0.0.0",
@@ -204,6 +206,7 @@ def run(
             storage_manager=storage,
             db=db,
             config=config,
+            camera=camera,
         )
 
         def _run_uvicorn():
@@ -250,7 +253,6 @@ def run(
     for _ in range(20):
         frame, _, _ = state.get_frame_for_ai()
         if frame is not None:
-            logger.info("Primeiro frame recebido: %s", frame.shape)
             break
         time.sleep(0.1)
     else:
@@ -258,7 +260,6 @@ def run(
 
     # Ajusta FPS real da fonte
     if camera.real_fps != vid_fps:
-        logger.info("Ajustando FPS do buffer: %.1f → %.1f", vid_fps, camera.real_fps)
         buf.resize_buffer(camera.real_fps)
 
     logger.info("Carregando modelos de IA...")
@@ -319,14 +320,14 @@ def run(
 def main():
     parser = argparse.ArgumentParser(description="CamSecurity backend")
     parser.add_argument("--config", default="config.yaml", help="Caminho para o config (padrão: config.yaml)")
-    parser.add_argument("--no-display", action="store_true", help="Roda sem janela OpenCV")
+    parser.add_argument("--display", action="store_true", help="Abre janela gráfica do OpenCV no desktop")
     parser.add_argument("--no-server", action="store_true", help="Desativa o servidor FastAPI/WebSocket")
     parser.add_argument("--port", type=int, default=8000, help="Porta do servidor Web (padrão: 8000)")
     parser.add_argument("--host", default="0.0.0.0", help="Host do servidor Web (padrão: 0.0.0.0)")
     args = parser.parse_args()
     run(
         load_config(args.config),
-        display=not args.no_display,
+        display=args.display,
         config_path=args.config,
         enable_server=not args.no_server,
         server_host=args.host,

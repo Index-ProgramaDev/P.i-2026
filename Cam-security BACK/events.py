@@ -12,7 +12,6 @@ logger = logging.getLogger("camsecurity.events")
 
 class EventKind(Enum):
     ANOMALY_CONFIRMED = auto()
-    ANOMALY_CLEARED   = auto()
 
 
 @dataclass
@@ -60,8 +59,7 @@ class EventManager:
             anomalo = result.ucf_score >= self._threshold
             self._history.append(anomalo)
             if anomalo:
-                logger.info("Anomalia detectada | frame=%d  score=%.4f  %s",
-                            result.frame_seq, result.ucf_score, resumo)
+                logger.info("⚠ Anomalia detectada | score=%.3f", result.ucf_score)
 
         hits = sum(self._history)
         confirmado = len(self._history) == self._window and hits >= self._min_hits
@@ -80,18 +78,10 @@ class EventManager:
                            result.frame_seq, result.ucf_score or 0.0, hits, self._window, resumo)
             self._alert.disparar(motivo=f"Anomalia confirmada — {resumo}", score=result.ucf_score)
             self._dispatch(event)
-
         elif not confirmado and self._in_anomaly:
+            # Limpa flag mas NÃO gera evento CLEARED (evita falsos positivos)
             self._in_anomaly = False
-            event = Event(
-                kind=EventKind.ANOMALY_CLEARED,
-                frame_seq=result.frame_seq, timestamp=result.timestamp,
-                ucf_score=result.ucf_score or 0.0, yolo_summary=resumo,
-                frame=result.annotated_frame,
-            )
-            logger.info("ANOMALIA ENCERRADA | frame=%d  score=%.4f  %s",
-                        result.frame_seq, result.ucf_score or 0.0, resumo)
-            self._dispatch(event)
+            event = None
 
         return event
 

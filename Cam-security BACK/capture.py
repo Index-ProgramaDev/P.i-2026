@@ -33,11 +33,11 @@ class CameraCapture:
         self.video_buffer = video_buffer
 
         # Parâmetros de reconexão exponencial (Backoff)
-        self.reconnect_base_delay = 1.0     # 1 segundo inicial
+        self.reconnect_base_delay = 2.0     # 2 segundos inicial (aumentado)
         self.reconnect_max_delay = 30.0     # teto de 30 segundos
-        self.reconnect_factor = 2.0         # dobra a cada tentativa
+        self.reconnect_factor = 1.5         # aumenta 50% a cada tentativa (reduzido)
         self.consecutive_failures = 0
-        self.max_frame_timeout_sec = 5.0    # timeout sem frames para considerar queda
+        self.max_frame_timeout_sec = 10.0    # timeout sem frames para considerar queda (aumentado)
 
         self._load_config()
 
@@ -61,7 +61,7 @@ class CameraCapture:
     def _is_url(path: any) -> bool:
         if isinstance(path, str):
             lower = path.lower()
-            return lower.startswith(("rtsp://", "http://", "https://", "rtmp://"))
+            return lower.startswith(("rtsp://", "http://", "https://", "rtmp://", "rtsps://"))
         return False
 
     def _open_capture(self) -> bool:
@@ -83,14 +83,65 @@ class CameraCapture:
             )
         )
 
-        logger.info("Tentando abrir fonte: %s (stream_rede=%s, arquivo=%s)",
-                    self.source, self.is_network_stream, self.is_video)
-
-        try:
-            self.cap = cv2.VideoCapture(self.source)
-        except Exception as e:
-            logger.error("Exceção ao instanciar VideoCapture: %s", e)
-            return False
+        # Configurações especiais para streams HTTP (IP Webcam)
+        if self.is_network_stream:
+            if isinstance(self.source, str) and self.source.lower().startswith("http"):
+                try:
+                    # Para IP Webcam, tenta endpoints alternativos
+                    sources_to_try = [self.source]
+                    
+                    # Se termina em /video, tenta também /videofeed e outras variantes
+                    if self.source.endswith("/video"):
+                        base = self.source.rsplit("/", 1)[0]
+                        sources_to_try.extend([
+                            f"{base}/videofeed",
+                            f"{base}/video?dummy=param.mjpg",
+                        ])
+                    
+                    connected = False
+                    for src in sources_to_try:
+                        try:
+                            logger.info("Tentando conectar: %s", src)
+                            self.cap = cv2.VideoCapture(src)
+                            if self.cap and self.cap.isOpened():
+                                # Testa leitura de um frame
+                                ret, test_frame = self.cap.read()
+                                if ret and test_frame is not None:
+                                    logger.info("Conectado: %s", src)
+                                    self.source = src  # Atualiza para a URL que funcionou
+                                    connected = True
+                                    break
+                                else:
+                                    self.cap.release()
+                        except Exception as e:
+                            logger.debug("Falha em %s: %s", src, e)
+                            continue
+                    
+                    if not connected:
+                        logger.error("Nenhuma variante de URL funcionou")
+                        return False
+                        
+                except Exception as e:
+                    logger.error("Erro ao conectar stream HTTP: %s", e)
+                    return False
+            else:
+                # RTSP, RTMP, etc
+                try:
+                    self.cap = cv2.VideoCapture(self.source)
+                    if self.cap.isOpened():
+                        logger.info("Conectado: %s", self.source)
+                except Exception as e:
+                    logger.error("Erro ao abrir VideoCapture: %s", e)
+                    return False
+        else:
+            # Arquivo local ou câmera USB
+            try:
+                self.cap = cv2.VideoCapture(self.source)
+                if self.cap.isOpened():
+                    logger.info("Conectado: %s", self.source)
+            except Exception as e:
+                logger.error("Erro ao abrir VideoCapture: %s", e)
+                return False
 
         # Fallback para câmeras locais USB se configurado ID numérico que falhou
         if not self.cap.isOpened() and not isinstance(self.source, str):
@@ -107,6 +158,14 @@ class CameraCapture:
         if not self.cap or not self.cap.isOpened():
             logger.warning("Falha ao abrir VideoCapture para fonte: %s", self.source)
             return False
+
+        # Configurações específicas para streams de rede
+        if self.is_network_stream:
+            # Buffer size 1 para reduzir latência
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # Timeout para leitura de frames (em ms)
+            self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
 
         if self.is_video:
             real_fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -132,7 +191,7 @@ class CameraCapture:
         self.running = True
         self.thread = threading.Thread(target=self._loop, daemon=True, name="cam-capture")
         self.thread.start()
-        logger.info("Captura iniciada (running=True).")
+        logger.info("Captura iniciada")
 
     @property
     def real_fps(self) -> float:
@@ -175,8 +234,15 @@ class CameraCapture:
 
                 # Câmera física ou RTSP: verifica se excedeu timeout sem frames
                 if now - last_successful_frame_time > self.max_frame_timeout_sec:
-                    logger.warning("Timeout (%.1fs) sem receber frames da fonte. Disparando reconexão...",
+                    logger.warning("Timeout %.1fs sem frames. Reconectando...",
                                    self.max_frame_timeout_sec)
+                    # Libera captura antes de reconectar
+                    if self.cap:
+                        try:
+                            self.cap.release()
+                        except Exception:
+                            pass
+                        self.cap = None
                     self._handle_reconnect()
                     last_successful_frame_time = time.perf_counter()
                 else:
@@ -186,7 +252,7 @@ class CameraCapture:
             # Frame lido com sucesso: reseta contador de falhas
             last_successful_frame_time = now
             if self.consecutive_failures > 0:
-                logger.info("Stream restabelecida com sucesso após falhas!")
+                logger.info("Stream restabelecida!")
                 self.consecutive_failures = 0
 
             try:
@@ -220,10 +286,8 @@ class CameraCapture:
             self.reconnect_max_delay,
         )
 
-        logger.warning(
-            "Conexão perdida com a câmera. Tentativa #%d de reconexão em %.1f segundos...",
-            self.consecutive_failures, delay
-        )
+        logger.warning("Conexão perdida. Reconectando em %.1fs (tentativa #%d)...",
+                       delay, self.consecutive_failures)
 
         # Espera com checagem de self.running para não bloquear shutdown
         start_wait = time.perf_counter()
@@ -235,16 +299,42 @@ class CameraCapture:
 
         ok = self._open_capture()
         if ok:
-            logger.info("Reconexão bem-sucedida com a fonte: %s!", self.source)
+            logger.info("Reconexão bem-sucedida!")
             self.consecutive_failures = 0
-        else:
-            logger.warning("Falha na tentativa #%d de reconexão.", self.consecutive_failures)
 
     def get_frame(self, return_meta=False):
         with self.lock:
             frame = self.frame.copy() if self.frame is not None else None
             seq, ts = self.frame_seq, self.frame_captured_at
         return (frame, seq, ts) if return_meta else frame
+
+    def switch_source(self, new_source: any) -> bool:
+        """Altera a fonte de vídeo dinamicamente (webcam 0, RTSP ou arquivo)."""
+        logger.info("Alternando fonte para: %s", new_source)
+        with self.lock:
+            # Converte string de número para int (ex: "0" -> 0)
+            if isinstance(new_source, str) and new_source.isdigit():
+                new_source = int(new_source)
+
+            if isinstance(new_source, int):
+                self.camera_id = new_source
+                self.video_path = ""
+            else:
+                self.video_path = str(new_source).strip() if new_source else ""
+
+            self.consecutive_failures = 0
+            return self._open_capture()
+
+    def get_status(self) -> dict:
+        return {
+            "source": self.source,
+            "is_video": self.is_video,
+            "is_network": self.is_network_stream,
+            "running": self.running,
+            "fps": self.fps,
+            "width": self.width,
+            "height": self.height,
+        }
 
     def stop(self):
         self.running = False

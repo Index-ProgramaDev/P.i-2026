@@ -1,0 +1,267 @@
+/* Design System - CamSecurity */
+:root {
+  /* Paleta Obrigatória CamSecurity */
+  --bg-main: #08090C;
+  --bg-surface: #111318;
+  --bg-surface-elevated: #20232B;
+  --border-subtle: #282B32;
+  --text-main: #F5F5F7;
+  --text-secondary: #9297A3;
+  --primary-red: #D62836;
+  --primary-red-hover: #EE3543;
+  --success-green: #27C985;
+  --warning-yellow: #F5B942;
+  --danger-red: #F04452;
+
+  /* Compatibilidade com variáveis preexistentes */
+  --bg-primary: var(--bg-main);
+  --bg-secondary: var(--bg-surface);
+  --bg-card: var(--bg-surface);
+  --bg-card-hover: var(--bg-surface-elevated);
+  --border: var(--border-subtle);
+  --text-primary: var(--text-main);
+  --accent: var(--primary-red);
+  --accent-hover: var(--primary-red-hover);
+  --success: var(--success-green);
+  --warning: var(--warning-yellow);
+  --danger: var(--danger-red);
+
+  /* Dimensões e Tipografia */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --sidebar-width: 210px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar compacto e discreto */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-xs);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2f3440;
+}
+
+/* Tipografia */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1, h2, h3, h4 {
+  color: var(--text-main);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Superfícies e Cards */
+.card-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 16px 20px;
+}
+
+.card-elevated {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 16px 20px;
+}
+
+/* Badges operacionais discretos */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge-success {
+  background: rgba(39, 201, 133, 0.12);
+  color: var(--success-green);
+  border: 1px solid rgba(39, 201, 133, 0.25);
+}
+.badge-danger {
+  background: rgba(240, 68, 82, 0.12);
+  color: var(--danger-red);
+  border: 1px solid rgba(240, 68, 82, 0.25);
+}
+.badge-warning {
+  background: rgba(245, 185, 66, 0.12);
+  color: var(--warning-yellow);
+  border: 1px solid rgba(245, 185, 66, 0.25);
+}
+.badge-neutral {
+  background: rgba(146, 151, 163, 0.12);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+/* Pulsing dot */
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulseAnimation 2s infinite;
+}
+.pulse-dot.online {
+  background: var(--success-green);
+  box-shadow: 0 0 6px var(--success-green);
+}
+.pulse-dot.recording {
+  background: var(--danger-red);
+  box-shadow: 0 0 6px var(--danger-red);
+}
+
+@keyframes pulseAnimation {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+/* Form controls (38-42px de altura) */
+input, select, textarea {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+  width: 100%;
+}
+textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 10px 12px;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary-red);
+}
+input::placeholder, textarea::placeholder {
+  color: #555a66;
+}
+
+/* Botões operacionais (38-42px altura) */
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--primary-red);
+  color: #FFFFFF;
+  border-color: var(--primary-red);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-red-hover);
+  border-color: var(--primary-red-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: #282c37;
+  border-color: #353942;
+}
+
+.btn-danger {
+  background: rgba(240, 68, 82, 0.12);
+  color: var(--danger-red);
+  border: 1px solid rgba(240, 68, 82, 0.25);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(240, 68, 82, 0.22);
+}
+
+.btn-success {
+  background: rgba(39, 201, 133, 0.12);
+  color: var(--success-green);
+  border: 1px solid rgba(39, 201, 133, 0.25);
+}
+.btn-success:hover:not(:disabled) {
+  background: rgba(39, 201, 133, 0.22);
+}
+
+/* Tabela operacional */
+.op-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.op-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-weight: 500;
+  background: var(--bg-surface);
+}
+.op-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+}
+.op-table tr:hover td {
+  background: rgba(32, 35, 43, 0.4);
+}
+
+/* Animações sutis */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}

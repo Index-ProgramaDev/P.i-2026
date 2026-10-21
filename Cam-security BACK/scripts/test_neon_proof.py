@@ -12,9 +12,13 @@ Executa ciclo ponta a ponta:
 import os
 import sys
 import time
+from pathlib import Path
+root_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root_dir))
+
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(root_dir / ".env")
 
 print("=" * 70)
 print("  PROVA DE FUNCIONAMENTO - BANCO DE DADOS NEON (PostgreSQL)")

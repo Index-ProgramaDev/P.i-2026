@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 def clean_storage(interactive: bool = True):
-    root_dir = Path(__file__).resolve().parent
+    # scripts/ -> pasta raiz
+    root_dir = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root_dir))
     storage_dir = root_dir / "storage"
     events_dir = storage_dir / "events"
     events_log = storage_dir / "events.jsonl"

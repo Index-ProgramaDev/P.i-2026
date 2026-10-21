@@ -49,7 +49,6 @@ class BBoxTracker:
         if novos:
             self._suspects.update(novos)
             self._last_alert = time.perf_counter()
-            logger.info("Suspeitos marcados: %s", sorted(novos))
 
     def update(self, detections, is_anomalous: bool):
         now = time.perf_counter()
@@ -96,9 +95,8 @@ class AnomalyProcessor:
 
     def start(self) -> None:
         """Carrega os modelos YOLO e UCF."""
-        logger.info("Carregando YOLO de %s ...", self._yolo_path)
+        logger.info("Carregando modelos de IA...")
         self._yolo = YOLO(self._yolo_path)
-        logger.info("Carregando UCF (ResNet50 + LSTM) ...")
         self._ucf = UCFStreamAdapter(
             checkpoint_path=self._ucf_ckpt,
             device=self._device,
@@ -107,7 +105,7 @@ class AnomalyProcessor:
             threshold=self._ucf_thresh,
         )
         self._ready = True
-        logger.info("Modelos prontos.")
+        logger.info("Modelos carregados")
 
     def process_frame(self, frame: np.ndarray, seq: int, ts: float) -> AnomalyResult:
         """Executa YOLO + UCF em um frame e retorna o resultado."""
@@ -128,12 +126,11 @@ class AnomalyProcessor:
 
         detections, is_anomalous = self._tracker.update(detections, is_anomalous)
 
-        if yolo_ms > 150:
-            logger.warning("YOLO lento | frame=%d  %.1fms", seq, yolo_ms)
-        if new_ucf:
-            logger.info("UCF | frame=%d  score=%.4f  pessoas=%d  %s",
-                        seq, ucf_score, len(detections),
-                        "ANOMALIA" if is_anomalous else "normal")
+        if yolo_ms > 200:  # Aumentado threshold para reduzir logs
+            logger.warning("YOLO lento: %.1fms", yolo_ms)
+        if new_ucf and ucf_score and ucf_score >= 0.4:  # Só loga se score alto
+            logger.info("UCF score=%.3f %s", ucf_score,
+                        "⚠ ANOMALIA" if is_anomalous else "")
 
         annotated = self._draw_overlays(frame, detections, ucf_score, is_anomalous, yolo_ms, ucf_ms) if self._draw else frame
 
@@ -158,9 +155,6 @@ class AnomalyProcessor:
         """Roda YOLO em um frame e retorna lista de detecções."""
         # Loga resolução do frame apenas na primeira chamada para diagnóstico
         if not self._logged_dims:
-            h, w = frame.shape[:2]
-            logger.info("Frame recebido pelo YOLO: %dx%d  imgsz=%d  conf=%.2f  iou=%.2f",
-                        w, h, self._imgsz, self._yolo_conf, self._iou)
             self._logged_dims = True
 
         kwargs = dict(
@@ -178,36 +172,28 @@ class AnomalyProcessor:
         return detections
 
     def _draw_overlays(self, frame: np.ndarray, detections, ucf_score, is_anomalous, yolo_ms=0.0, ucf_ms=0.0) -> np.ndarray:
-        """Desenha bounding boxes e painel de status no frame."""
+        """Desenha APENAS bounding boxes das pessoas detectadas."""
         out = frame.copy()
         H, W = out.shape[:2]
         suspects = self._tracker.get_suspects()
 
+        # Desenha apenas as bounding boxes das detecções
         for d in detections:
             x1, y1, x2, y2 = d.bbox
             suspeito = d.track_id is not None and d.track_id in suspects
             color = (0, 0, 255) if (suspeito or is_anomalous) else (0, 180, 255)
             thick = 3 if suspeito or is_anomalous else 2
+            
+            # Bounding box
             cv2.rectangle(out, (x1, y1), (x2, y2), color, thick)
-            label = f"{'[!] ' if suspeito else ''}{d.class_name} {d.confidence:.0%}"
+            
+            # Label com nome da classe e confiança
+            label = f"{d.class_name} {d.confidence:.0%}"
+            if suspeito:
+                label = f"[!] {label}"
+            
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 2, y1), color, -1)
             cv2.putText(out, label, (x1 + 1, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Painel superior
-        cv2.rectangle(out, (0, 0), (W, 50), (20, 20, 20), -1)
-        if ucf_score is None:
-            status, score_txt, cor = "UCF: aquecendo...", "", (100, 100, 100)
-        elif is_anomalous:
-            status, score_txt, cor = "ANOMALIA DETECTADA", f"score={ucf_score:.3f}", (0, 0, 220)
-        else:
-            status, score_txt, cor = "Normal", f"score={ucf_score:.3f}", (0, 180, 0)
-
-        cv2.rectangle(out, (0, 0), (W, 50), cor, 3)
-        cv2.putText(out, status, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        if score_txt:
-            cv2.putText(out, score_txt, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1)
-        timing = f"YOLO:{yolo_ms:.0f}ms  UCF:{ucf_ms:.0f}ms"
-        (ttw, _), _ = cv2.getTextSize(timing, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
-        cv2.putText(out, timing, (W - ttw - 6, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1)
         return out
