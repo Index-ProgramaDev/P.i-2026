@@ -216,6 +216,7 @@ def run(
                 port=server_port,
                 log_level="warning",
                 access_log=False,
+                ws="websockets",  # ← Força uso do websockets
             )
             nonlocal uvi_server
             uvi_server = uvicorn.Server(uvi_config)
@@ -227,8 +228,21 @@ def run(
                     "127.0.0.1" if server_host == "0.0.0.0" else server_host, server_port)
 
     storage.set_video_buffer(buf)
-    events.on_event(storage.save_event)
     events.set_storage_manager(storage)
+
+    def _assign_event_camera(event):
+        camera_info = db.find_camera_by_source(camera.source)
+        if camera_info:
+            event.camera_uid = camera_info["camera_uid"]
+            event.user_id = camera_info["user_id"]
+        else:
+            logger.warning(
+                "Fonte ativa %s não está vinculada a uma câmera cadastrada; evento salvo sem usuário",
+                camera.source,
+            )
+
+    events.on_event(_assign_event_camera)
+    events.on_event(storage.save_event)
 
     def _on_confirmado(event):
         if event.kind == EventKind.ANOMALY_CONFIRMED:
@@ -238,10 +252,12 @@ def run(
         if server:
             server.broadcast_event({
                 "type": "ALERT",
+                "id": event.event_id,  # ← Adiciona o ID do evento
                 "kind": event.kind.name,
                 "timestamp": event.timestamp,
                 "score": float(event.ucf_score),
                 "detections": event.yolo_summary,
+                "camera_uid": event.camera_uid,
             })
 
     events.on_event(_on_confirmado)

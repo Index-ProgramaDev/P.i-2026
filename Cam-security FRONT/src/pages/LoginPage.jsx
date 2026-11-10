@@ -1,291 +1,200 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Shield, Eye, EyeOff, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2, Lock, Shield, User } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
+import { AuthToast, Field, TacticalPanel, delay } from "../components/AuthShell";
+
+const STORAGE_KEY = "camsec_user";
 
 export default function LoginPage() {
-  const [emailOrUsername, setEmailOrUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [keepLogged, setKeepLogged] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [toast, setToast] = useState(null);
 
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const notify = (type, message) => setToast({ type, message });
+
+  const persistUser = (user) => {
+    const [keep, drop] = keepLogged ? [localStorage, sessionStorage] : [sessionStorage, localStorage];
+    keep.setItem(STORAGE_KEY, JSON.stringify(user));
+    drop.removeItem(STORAGE_KEY);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError("");
-    setSuccess("");
+    setToast(null);
 
-    const key = emailOrUsername.trim();
-    if (!key) {
-      setError("Informe seu usuário ou e-mail.");
-      return;
-    }
-    if (!password) {
-      setError("Informe sua senha.");
-      return;
-    }
+    const username = identifier.trim();
+    if (!username) return notify("error", "Informe seu usuário ou e-mail para continuar.");
+    if (!password) return notify("error", "Informe sua senha de acesso.");
 
     setLoading(true);
     try {
-      const res = await api.login(key, password);
-      if (res && res.success && res.user) {
-        setSuccess("Login autenticado com sucesso!");
-        login(res.user);
-        if (keepLogged) {
-          localStorage.setItem("camsec_user", JSON.stringify(res.user));
-        } else {
-          sessionStorage.setItem("camsec_user", JSON.stringify(res.user));
-        }
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 400);
-      } else {
-        setError(res?.detail || "Credenciais inválidas. Verifique seu usuário e senha.");
+      const res = await api.login(username, password);
+      if (!res?.success || !res.user) {
+        return notify("error", res?.detail || "Credenciais inválidas. Verifique seu usuário e senha.");
       }
+      login(res.user);
+      persistUser(res.user);
+      notify("success", "Credenciais validadas. Redirecionando para o painel...");
+      setTimeout(() => navigate("/dashboard"), 900);
     } catch (err) {
-      setError(err.message || "Erro de conexão com o servidor.");
+      const message = err.message || "";
+      const isNetworkError = /fetch|network/i.test(message);
+      notify(
+        "error",
+        isNetworkError
+          ? "Não foi possível alcançar o servidor. Verifique sua conexão e tente novamente."
+          : message || "Erro de conexão com o servidor."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div
-      className="fade-in"
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "var(--bg-main)",
-        padding: "24px 16px",
-      }}
-    >
-      <div
-        className="card-panel"
-        style={{
-          width: "100%",
-          maxWidth: "400px",
-          padding: "28px 24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-        }}
-      >
-        {/* Logo & Header */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "10px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}
-          >
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "var(--radius-sm)",
-                backgroundColor: "var(--primary-red)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Shield size={20} color="#FFFFFF" />
+    <div className="flex min-h-screen bg-[#090A0F]">
+      <AuthToast toast={toast} onDismiss={() => setToast(null)} />
+      <TacticalPanel />
+
+      <main className="relative flex flex-1 items-center justify-center overflow-y-auto px-6 py-10 sm:px-10">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "radial-gradient(ellipse 50% 40% at 70% 20%, rgba(225,29,72,0.05), transparent 60%)" }}
+        />
+
+        <div className="login-scale-in relative z-10 my-auto w-full max-w-[420px]">
+          <div className="login-fade-up mb-8 flex items-center gap-3 lg:hidden" style={delay(0.05)}>
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#E11D48] shadow-[0_0_24px_-6px_rgba(225,29,72,0.6)]">
+              <Shield size={19} color="#FFFFFF" />
             </div>
-            <span style={{ fontSize: "17px", fontWeight: 700, letterSpacing: "-0.02em" }}>
-              CamSecurity
-            </span>
+            <span className="text-[15px] font-bold tracking-tight text-slate-100">CamSecurity</span>
           </div>
 
-          <div style={{ marginTop: "4px" }}>
-            <h1 style={{ fontSize: "22px", fontWeight: 600, color: "var(--text-main)" }}>
-              Faça seu login!
-            </h1>
-            <p style={{ color: "var(--text-secondary)", fontSize: "13px", marginTop: "4px" }}>
-              Entre com suas credenciais para acessar a plataforma operacional.
+          <header className="login-fade-up" style={delay(0.12)}>
+            <p className="login-eyebrow mb-3 text-[11px] font-semibold uppercase text-rose-500/90">Acesso restrito</p>
+            <h1 className="text-[26px] font-bold tracking-tight text-slate-100">Bem-vindo de volta</h1>
+            <p className="mt-2 text-[13.5px] leading-relaxed text-slate-500">
+              Autentique-se para acessar o centro de operações e o monitoramento em tempo real.
             </p>
-          </div>
-        </div>
+          </header>
 
-        {/* Feedback visual */}
-        {error && (
-          <div
-            style={{
-              backgroundColor: "rgba(240, 68, 82, 0.12)",
-              border: "1px solid rgba(240, 68, 82, 0.25)",
-              color: "var(--danger-red)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: "13px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
+          <form
+            onSubmit={handleSubmit}
+            noValidate
+            className="login-fade-up mt-8 flex flex-col gap-5 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.8)] backdrop-blur-sm sm:p-8"
+            style={delay(0.2)}
           >
-            <AlertCircle size={16} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
-          </div>
-        )}
+            <Field id="login-email" label="Usuário ou E-mail" icon={User}>
+              <input
+                id="login-email"
+                type="text"
+                placeholder="operador@empresa.com"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                disabled={loading}
+                autoComplete="username"
+                className="login-input"
+              />
+            </Field>
 
-        {success && (
-          <div
-            style={{
-              backgroundColor: "rgba(39, 201, 133, 0.12)",
-              border: "1px solid rgba(39, 201, 133, 0.25)",
-              color: "var(--success-green)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: "13px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-            <span>{success}</span>
-          </div>
-        )}
-
-        {/* Formulário */}
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          <div>
-            <label
-              htmlFor="login-email"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
+            <Field
+              id="login-password"
+              label="Senha"
+              icon={Lock}
+              aside={
+                <button
+                  type="button"
+                  onClick={() => notify("info", "Para recuperar a senha, contate o administrador do sistema.")}
+                  className="text-[12px] font-medium text-slate-500 transition-colors hover:text-rose-400"
+                >
+                  Esqueceu a senha?
+                </button>
+              }
             >
-              E-mail ou Usuário
-            </label>
-            <input
-              id="login-email"
-              type="text"
-              placeholder="seu_usuario ou email@empresa.com"
-              value={emailOrUsername}
-              onChange={(e) => setEmailOrUsername(e.target.value)}
-              disabled={loading}
-              autoComplete="username"
-              required
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="login-password"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              Senha
-            </label>
-            <div style={{ position: "relative" }}>
               <input
                 id="login-password"
                 type={showPassword ? "text" : "password"}
-                placeholder="••••••••"
+                placeholder="••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
                 autoComplete="current-password"
-                style={{ paddingRight: "40px" }}
-                required
+                className="login-input login-input-pwd"
               />
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  position: "absolute",
-                  right: "4px",
-                  top: "2px",
-                  height: "36px",
-                  width: "36px",
-                  padding: 0,
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-secondary)",
-                }}
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                 tabIndex={-1}
+                className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
-            </div>
-          </div>
+            </Field>
 
-          {/* Opções auxiliares */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              fontSize: "13px",
-              marginTop: "2px",
-            }}
-          >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                color: "var(--text-secondary)",
-                cursor: "pointer",
-              }}
-            >
+            <label className="group flex w-fit cursor-pointer select-none items-center gap-2.5">
               <input
                 type="checkbox"
                 checked={keepLogged}
                 onChange={(e) => setKeepLogged(e.target.checked)}
-                style={{ width: "15px", height: "15px", accentColor: "var(--primary-red)" }}
+                className="peer sr-only"
               />
-              Manter sessão
+              <span className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border border-slate-700 bg-[#0D0E12] transition-colors group-hover:border-slate-600 peer-checked:border-rose-500 peer-checked:bg-rose-500 peer-focus-visible:ring-2 peer-focus-visible:ring-rose-500/40">
+                {keepLogged && (
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1.5 5.5l2.5 2.5 4.5-5" />
+                  </svg>
+                )}
+              </span>
+              <span className="text-[12.5px] text-slate-400 transition-colors group-hover:text-slate-300">
+                Manter sessão ativa
+              </span>
             </label>
 
-            <span
-              style={{
-                color: "var(--text-secondary)",
-                fontSize: "12px",
-                cursor: "pointer",
-                textDecoration: "underline",
-              }}
-              onClick={() => alert("Para recuperar a senha de operador, contate o administrador do sistema ou consulte o arquivo de configuração.")}
+            <button
+              type="submit"
+              disabled={loading}
+              className="login-btn login-btn-shimmer flex h-12 w-full items-center justify-center gap-2.5 rounded-lg bg-[#E11D48] text-[14px] font-semibold text-white shadow-[0_6px_24px_-8px_rgba(225,29,72,0.6)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Esqueceu a senha?
-            </span>
-          </div>
+              {loading ? (
+                <>
+                  <Loader2 size={17} className="animate-spin" />
+                  Autenticando...
+                </>
+              ) : (
+                <>
+                  Continuar
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </form>
 
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={loading}
-            style={{ width: "100%", marginTop: "8px" }}
-          >
-            {loading ? "Autenticando..." : "Continuar"}
-            {!loading && <ArrowRight size={16} />}
-          </button>
-        </form>
+          <p className="login-fade-up mt-8 border-t border-white/[0.06] pt-6 text-center text-[13px] text-slate-500" style={delay(0.3)}>
+            Não possui acesso?{" "}
+            <Link to="/register" className="font-semibold text-rose-400 transition-colors hover:text-rose-300">
+              Criar sua conta
+            </Link>
+          </p>
 
-        {/* Link para criação de conta */}
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: "13px",
-            color: "var(--text-secondary)",
-            paddingTop: "6px",
-            borderTop: "1px solid var(--border-subtle)",
-          }}
-        >
-          Não possui acesso?{" "}
-          <Link
-            to="/register"
-            style={{ color: "var(--primary-red)", fontWeight: 500, textDecoration: "none" }}
-          >
-            Criar sua conta
-          </Link>
+          <p className="login-fade-up mt-6 text-center text-[11px] text-slate-600" style={delay(0.36)}>
+            Acesso restrito a pessoal autorizado. Todas as tentativas são registradas.
+          </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

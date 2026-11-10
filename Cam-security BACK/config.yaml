@@ -1,5 +1,5 @@
 # ── Fonte de vídeo ────────────────────────────────────────────────────────────
-video_path: ""  # Vazio para usar a câmera real ao vivo (webcam)
+video_path: "./video/Vandalismo.mp4"  # Vazio para usar a câmera real ao vivo (webcam)
 camera_id:  0
 width:       640
 height:      480

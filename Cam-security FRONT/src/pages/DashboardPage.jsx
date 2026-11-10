@@ -37,7 +37,7 @@ export default function DashboardPage() {
       }
       setCameras(userCams);
 
-      const eventsRes = await api.getEvents({ limit: 50 }).catch(() => ({ total: 0, items: [] }));
+      const eventsRes = await api.getEvents({ limit: 200 }).catch(() => ({ total: 0, items: [] }));
       const items = eventsRes.items || [];
       setEvents(items);
 
@@ -143,11 +143,51 @@ export default function DashboardPage() {
 
   const isCamRunning = Boolean(cameraStatus && cameraStatus.running);
   const activeCamerasCount = isCamRunning ? (cameras.length > 0 ? cameras.length : 1) : 0;
+
+  // Converte caminho técnico da fonte (ex: ./video/Vandalismo.mp4) em nome amigável
+  const friendlySourceName = (source) => {
+    if (!source) return "Câmera sem fonte";
+    const match = cameras.find((c) => c.source === source || c.camera_uid === source);
+    if (match?.name) return match.name;
+    const base = String(source).split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, "");
+    const pretty = base.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+    return pretty || source;
+  };
   const pendingAlertsCount = events.filter((e) => {
     const meta = typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {});
     return !meta.status || meta.status === "pendente";
   }).length;
   const totalEventsCount = events.length;
+
+  // ---- Dados para gráficos de ocorrências ----
+  const dayBuckets = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    d.setHours(0, 0, 0, 0);
+    return {
+      key: d.toISOString().slice(0, 10),
+      label: d.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""),
+      count: 0,
+    };
+  });
+  const kindCounts = {};
+  events.forEach((ev) => {
+    const ts = (ev.timestamp || 0) * 1000;
+    if (ts) {
+      const d = new Date(ts);
+      d.setHours(0, 0, 0, 0);
+      const bucket = dayBuckets.find((b) => b.key === d.toISOString().slice(0, 10));
+      if (bucket) bucket.count += 1;
+    }
+    const k = ev.kind || "OUTROS";
+    kindCounts[k] = (kindCounts[k] || 0) + 1;
+  });
+  const maxDayCount = Math.max(...dayBuckets.map((b) => b.count), 1);
+  const kindEntries = Object.entries(kindCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+  const kindMax = Math.max(...kindEntries.map(([, c]) => c), 1);
+  const chartTotal = events.length;
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -186,8 +226,11 @@ export default function DashboardPage() {
           <div style={{ fontSize: "26px", fontWeight: 700, color: "var(--text-main)" }}>
             {activeCamerasCount}
           </div>
-          <div style={{ fontSize: "12px", color: isCamRunning ? "var(--success-green)" : "var(--text-secondary)" }}>
-            {isCamRunning ? `Ativa: ${cameraStatus.source}` : "Nenhuma câmera ativa"}
+          <div
+            style={{ fontSize: "12px", color: isCamRunning ? "var(--success-green)" : "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={cameraStatus?.source || undefined}
+          >
+            {isCamRunning ? `Ativa: ${friendlySourceName(cameraStatus.source)}` : "Nenhuma câmera ativa"}
           </div>
         </div>
 
@@ -222,6 +265,168 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Gráficos de Ocorrências */}
+      <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+          <div>
+            <h2 style={{ fontSize: "15px", fontWeight: 600 }}>Ocorrências</h2>
+            <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+              Distribuição dos últimos eventos registrados no sistema.
+            </p>
+          </div>
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontSize: "11px",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius-xs)",
+              padding: "3px 10px",
+            }}
+          >
+            TOTAL: <strong style={{ color: "var(--text-main)" }}>{chartTotal}</strong>
+          </span>
+        </div>
+
+        {chartTotal === 0 ? (
+          <div
+            style={{
+              minHeight: "140px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px dashed var(--border-subtle)",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--text-secondary)",
+              fontSize: "13px",
+            }}
+          >
+            Nenhuma ocorrência registrada para exibição.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: "24px",
+            }}
+          >
+            {/* Barras — últimos 7 dias */}
+            <div>
+              <p
+                style={{
+                  fontSize: "11px",
+                  fontFamily: "monospace",
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--text-secondary)",
+                  marginBottom: "12px",
+                }}
+              >
+                Últimos 7 dias
+              </p>
+              <svg viewBox="0 0 700 180" style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Ocorrências por dia">
+                {dayBuckets.map((b, i) => {
+                  const h = b.count === 0 ? 4 : Math.max(8, (b.count / maxDayCount) * 140);
+                  const x = 40 + i * 95;
+                  const y = 158 - h;
+                  return (
+                    <g key={b.key}>
+                      <rect
+                        x={x}
+                        y={y}
+                        width="56"
+                        height={h}
+                        rx="4"
+                        fill={b.count > 0 ? "#E11D48" : "#1c2029"}
+                        opacity={b.count > 0 ? 0.9 : 1}
+                      >
+                        <title>{`${b.label}: ${b.count} ocorrência(s)`}</title>
+                      </rect>
+                      {b.count > 0 && (
+                        <text x={x + 28} y={y - 7} textAnchor="middle" fontSize="11" fontWeight="700" fill="#f1f5f9">
+                          {b.count}
+                        </text>
+                      )}
+                      <text x={x + 28} y="174" textAnchor="middle" fontSize="10" fill="#64748b">
+                        {b.label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+            {/* Barras horizontais — por tipo */}
+            <div>
+              <p
+                style={{
+                  fontSize: "11px",
+                  fontFamily: "monospace",
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--text-secondary)",
+                  marginBottom: "12px",
+                }}
+              >
+                Por tipo de evento
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {kindEntries.map(([kind, count]) => (
+                  <div key={kind} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span
+                      style={{
+                        width: "110px",
+                        flexShrink: 0,
+                        fontSize: "12px",
+                        color: "var(--text-secondary)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={kind}
+                    >
+                      {kind}
+                    </span>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: "8px",
+                        backgroundColor: "#1a1d26",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${(count / kindMax) * 100}%`,
+                          height: "100%",
+                          background: "linear-gradient(90deg, #9F1239, #E11D48)",
+                          borderRadius: "4px",
+                          transition: "width 0.4s ease",
+                        }}
+                      />
+                    </div>
+                    <span
+                      style={{
+                        width: "34px",
+                        textAlign: "right",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        fontWeight: 600,
+                        color: "var(--text-main)",
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Grid Principal: Alertas Recentes & Câmeras */}
       <div
         style={{
@@ -245,21 +450,56 @@ export default function DashboardPage() {
           {recentAlerts.length === 0 ? (
             <div
               style={{
-                height: "160px",
+                minHeight: "190px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexDirection: "column",
-                gap: "8px",
+                gap: "10px",
                 backgroundColor: "var(--bg-surface-elevated)",
-                borderRadius: "var(--radius-xs)",
+                borderRadius: "var(--radius-sm)",
                 border: "1px dashed var(--border-subtle)",
-                color: "var(--text-secondary)",
-                fontSize: "13px",
+                padding: "24px",
+                textAlign: "center",
               }}
             >
-              <CheckCircle2 size={24} color="var(--success-green)" />
-              <span>Sem alertas recentes pendentes.</span>
+              <div
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  borderRadius: "50%",
+                  border: "1px solid rgba(39, 201, 133, 0.3)",
+                  backgroundColor: "rgba(39, 201, 133, 0.08)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <CheckCircle2 size={20} color="var(--success-green)" />
+              </div>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>
+                  Nenhum incidente registrado
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "3px", maxWidth: "280px" }}>
+                  Sistema operando em estabilidade total nas últimas 24 horas.
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--success-green)",
+                  border: "1px solid rgba(39, 201, 133, 0.25)",
+                  borderRadius: "var(--radius-xs)",
+                  padding: "3px 8px",
+                  backgroundColor: "rgba(39, 201, 133, 0.08)",
+                }}
+              >
+                Status: Nominal
+              </span>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -313,21 +553,46 @@ export default function DashboardPage() {
           {!isCamRunning && cameras.length === 0 ? (
             <div
               style={{
-                height: "160px",
+                minHeight: "190px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexDirection: "column",
-                gap: "8px",
+                gap: "10px",
                 backgroundColor: "var(--bg-surface-elevated)",
-                borderRadius: "var(--radius-xs)",
+                borderRadius: "var(--radius-sm)",
                 border: "1px dashed var(--border-subtle)",
-                color: "var(--text-secondary)",
-                fontSize: "13px",
+                padding: "24px",
+                textAlign: "center",
               }}
             >
-              <Camera size={24} color="#555a66" />
-              <span>Nenhuma câmera ativa ou acoplada.</span>
+              <div
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  borderRadius: "50%",
+                  border: "1px solid var(--border-subtle)",
+                  backgroundColor: "rgba(146, 151, 163, 0.06)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Camera size={20} color="var(--text-secondary)" />
+              </div>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>
+                  Nenhuma câmera conectada
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "3px", maxWidth: "280px" }}>
+                  Vincule uma câmera no módulo Câmeras para iniciar o monitoramento.
+                </div>
+              </div>
+              <Link to="/cameras">
+                <button className="btn-secondary" style={{ height: "32px", fontSize: "12px", padding: "0 14px", marginTop: "4px" }}>
+                  Configurar câmeras
+                </button>
+              </Link>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -347,8 +612,8 @@ export default function DashboardPage() {
                     <span className="pulse-dot online" />
                     <div>
                       <div style={{ fontSize: "13px", fontWeight: 600 }}>Câmera Ativa</div>
-                      <div style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                        Fonte: {cameraStatus?.source}
+                      <div style={{ fontSize: "11px", color: "var(--text-secondary)" }} title={cameraStatus?.source || undefined}>
+                        {friendlySourceName(cameraStatus?.source)}
                       </div>
                     </div>
                   </div>
@@ -376,7 +641,7 @@ export default function DashboardPage() {
                   <div>
                     <div style={{ fontSize: "13px", fontWeight: 600 }}>{c.name}</div>
                     <div style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                      {c.source} ({c.camera_uid})
+                      {c.camera_uid}
                     </div>
                   </div>
                   <Link to="/cameras">

@@ -273,26 +273,19 @@ class CamSecurityServer:
             return {"success": True, "event": updated}
 
         @app.post("/events/confirm-anomaly")
-        def confirm_anomaly_from_operator(req: ReviewEventRequest):
+        def confirm_anomaly_from_operator(req: ReviewEventRequest, event_id: Optional[str] = None):
             """Salva anomalia no banco APENAS quando operador confirmar."""
             if not self.db or not self.db.is_enabled():
                 raise HTTPException(status_code=503, detail="Banco Neon indisponível")
             
-            # Cria um evento temporário no banco para ser revisado
-            import time
-            event_id = f"temp_{int(time.time() * 1000)}"
+            # Se não passou event_id, retorna erro
+            if not event_id:
+                raise HTTPException(status_code=400, detail="event_id obrigatório")
             
-            self.db.insert_event(
-                event_id=event_id,
-                camera_uid="cam_default",
-                user_id=None,
-                kind="ANOMALY_CONFIRMED",
-                timestamp=time.time(),
-                frame_seq=0,
-                ucf_score=0.0,
-                detections="",
-                metadata={"status": "pendente", "awaiting_review": True},
-            )
+            # Busca o evento já existente (foi salvo pelo storage_manager)
+            ev = self.db.get_event_by_id(event_id)
+            if not ev:
+                raise HTTPException(status_code=404, detail="Evento não encontrado")
             
             # Atualiza com a decisão do operador
             updated = self.db.review_event(

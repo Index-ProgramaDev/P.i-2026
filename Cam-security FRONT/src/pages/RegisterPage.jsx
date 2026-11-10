@@ -1,7 +1,53 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Shield, Eye, EyeOff, AlertCircle, CheckCircle2, ArrowRight, Check, X } from "lucide-react";
+import {
+  ArrowRight,
+  AtSign,
+  Check,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  Mail,
+  Shield,
+  User,
+  X,
+} from "lucide-react";
 import { api } from "../api";
+import { AuthToast, Field, TacticalPanel, delay } from "../components/AuthShell";
+
+function PasswordChecklist({ password, confirmPassword }) {
+  const rules = [
+    { label: "Mínimo de 6 caracteres", ok: password.length >= 6 },
+    { label: "Pelo menos um número", ok: /\d/.test(password) },
+    {
+      label: "As senhas coincidem",
+      ok: password.length > 0 && password === confirmPassword,
+    },
+  ];
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3.5 py-3">
+      {rules.map(({ label, ok }) => (
+        <div
+          key={label}
+          className={`flex items-center gap-2 text-[12px] transition-colors duration-300 ${
+            ok ? "text-emerald-400" : "text-slate-500"
+          }`}
+        >
+          <span
+            className={`flex h-4 w-4 items-center justify-center rounded-full transition-colors duration-300 ${
+              ok ? "bg-emerald-500/15" : "bg-white/[0.04]"
+            }`}
+          >
+            {ok ? <Check size={10} strokeWidth={3} /> : <X size={10} strokeWidth={3} />}
+          </span>
+          {label}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
@@ -10,221 +56,148 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [toast, setToast] = useState(null);
 
   const navigate = useNavigate();
 
-  // Requisitos de senha
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const notify = (type, message) => setToast({ type, message });
+
   const hasMinLen = password.length >= 6;
   const hasNumber = /\d/.test(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError("");
-    setSuccess("");
+    setToast(null);
 
-    if (!hasMinLen) {
-      setError("A senha deve possuir pelo menos 6 caracteres.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("As senhas informadas não coincidem.");
-      return;
-    }
+    if (!fullName.trim()) return notify("error", "Informe seu nome completo.");
+    if (!hasMinLen) return notify("error", "A senha deve possuir pelo menos 6 caracteres.");
+    if (!hasNumber) return notify("error", "A senha deve conter pelo menos um número.");
+    if (!passwordsMatch) return notify("error", "As senhas informadas não coincidem.");
 
-    // Se username não foi preenchido explicitamente, extrai do e-mail ou do nome
-    const cleanUsername = username.trim() || email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "_");
+    const cleanUsername =
+      username.trim() || email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "_");
 
     setLoading(true);
     try {
       const res = await api.register(cleanUsername, email.trim(), password);
       if (res && res.success) {
-        setSuccess("Conta criada com sucesso! Redirecionando para login...");
-        setTimeout(() => {
-          navigate("/login");
-        }, 1200);
+        notify("success", "Conta criada com sucesso! Redirecionando para o login...");
+        setTimeout(() => navigate("/login"), 1400);
       } else {
-        setError(res?.detail || "Falha ao criar conta.");
+        notify("error", res?.detail || "Falha ao criar conta.");
       }
     } catch (err) {
-      setError(err.message || "Erro de conexão com o servidor.");
+      const message = err.message || "";
+      const isNetworkError = /fetch|network/i.test(message);
+      notify(
+        "error",
+        isNetworkError
+          ? "Não foi possível alcançar o servidor. Verifique sua conexão e tente novamente."
+          : message || "Erro de conexão com o servidor."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div
-      className="fade-in"
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "var(--bg-main)",
-        padding: "24px 16px",
-      }}
+  const eyeButton = (
+    <button
+      type="button"
+      onClick={() => setShowPassword((v) => !v)}
+      aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+      tabIndex={-1}
+      className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
     >
-      <div
-        className="card-panel"
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-          padding: "28px 24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "10px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}
-          >
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "var(--radius-sm)",
-                backgroundColor: "var(--primary-red)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Shield size={20} color="#FFFFFF" />
+      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+    </button>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-[#090A0F]">
+      <AuthToast toast={toast} onDismiss={() => setToast(null)} />
+      <TacticalPanel />
+
+      <main className="relative flex flex-1 items-center justify-center overflow-y-auto px-6 py-10 sm:px-10">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "radial-gradient(ellipse 50% 40% at 70% 20%, rgba(225,29,72,0.05), transparent 60%)" }}
+        />
+
+        <div className="login-scale-in relative z-10 my-auto w-full max-w-[440px]">
+          <div className="login-fade-up mb-8 flex items-center gap-3 lg:hidden" style={delay(0.05)}>
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#E11D48] shadow-[0_0_24px_-6px_rgba(225,29,72,0.6)]">
+              <Shield size={19} color="#FFFFFF" />
             </div>
-            <span style={{ fontSize: "17px", fontWeight: 700, letterSpacing: "-0.02em" }}>
-              CamSecurity
-            </span>
+            <span className="text-[15px] font-bold tracking-tight text-slate-100">CamSecurity</span>
           </div>
 
-          <div style={{ marginTop: "4px" }}>
-            <h1 style={{ fontSize: "22px", fontWeight: 600, color: "var(--text-main)" }}>
-              Crie sua conta
-            </h1>
-            <p style={{ color: "var(--text-secondary)", fontSize: "13px", marginTop: "4px" }}>
-              Já tem uma conta?{" "}
-              <Link to="/login" style={{ color: "var(--primary-red)", textDecoration: "none" }}>
-                Faça login.
+          <header className="login-fade-up" style={delay(0.12)}>
+            <p className="login-eyebrow mb-3 text-[11px] font-semibold uppercase text-rose-500/90">
+              Onboarding
+            </p>
+            <h1 className="text-[26px] font-bold tracking-tight text-slate-100">Crie sua conta</h1>
+            <p className="mt-2 text-[13.5px] leading-relaxed text-slate-500">
+              Já possui acesso?{" "}
+              <Link to="/login" className="font-semibold text-rose-400 transition-colors hover:text-rose-300">
+                Faça login
               </Link>
             </p>
-          </div>
-        </div>
+          </header>
 
-        {/* Feedback visual */}
-        {error && (
-          <div
-            style={{
-              backgroundColor: "rgba(240, 68, 82, 0.12)",
-              border: "1px solid rgba(240, 68, 82, 0.25)",
-              color: "var(--danger-red)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: "13px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
+          <form
+            onSubmit={handleSubmit}
+            noValidate
+            className="login-fade-up mt-8 flex flex-col gap-5 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-6 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.8)] backdrop-blur-sm sm:p-8"
+            style={delay(0.2)}
           >
-            <AlertCircle size={16} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
-          </div>
-        )}
+            <Field id="reg-name" label="Nome completo" icon={User}>
+              <input
+                id="reg-name"
+                type="text"
+                placeholder="Ex: Carlos Silva"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                disabled={loading}
+                autoComplete="name"
+                className="login-input"
+              />
+            </Field>
 
-        {success && (
-          <div
-            style={{
-              backgroundColor: "rgba(39, 201, 133, 0.12)",
-              border: "1px solid rgba(39, 201, 133, 0.25)",
-              color: "var(--success-green)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              fontSize: "13px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-            <span>{success}</span>
-          </div>
-        )}
+            <Field id="reg-username" label="Nome de usuário" icon={AtSign}>
+              <input
+                id="reg-username"
+                type="text"
+                placeholder="Ex: carlossilva"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={loading}
+                autoComplete="username"
+                className="login-input"
+              />
+            </Field>
 
-        {/* Formulário */}
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          <div>
-            <label
-              htmlFor="reg-name"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              Nome completo
-            </label>
-            <input
-              id="reg-name"
-              type="text"
-              placeholder="Ex: Carlos Silva"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              disabled={loading}
-              required
-            />
-          </div>
+            <Field id="reg-email" label="E-mail" icon={Mail}>
+              <input
+                id="reg-email"
+                type="email"
+                placeholder="operador@empresa.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                autoComplete="email"
+                className="login-input"
+              />
+            </Field>
 
-          <div>
-            <label
-              htmlFor="reg-username"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              Nome de usuário
-            </label>
-            <input
-              id="reg-username"
-              type="text"
-              placeholder="Ex: carlossilva"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              disabled={loading}
-              autoComplete="username"
-              required
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="reg-email"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              E-mail
-            </label>
-            <input
-              id="reg-email"
-              type="email"
-              placeholder="operador@empresa.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-              autoComplete="email"
-              required
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="reg-pass"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              Senha
-            </label>
-            <div style={{ position: "relative" }}>
+            <Field id="reg-pass" label="Senha" icon={Lock}>
               <input
                 id="reg-pass"
                 type={showPassword ? "text" : "password"}
@@ -233,109 +206,56 @@ export default function RegisterPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
                 autoComplete="new-password"
-                style={{ paddingRight: "40px" }}
-                required
+                className="login-input login-input-pwd"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  position: "absolute",
-                  right: "4px",
-                  top: "2px",
-                  height: "36px",
-                  width: "36px",
-                  padding: 0,
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--text-secondary)",
-                }}
-                tabIndex={-1}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
+              {eyeButton}
+            </Field>
 
-          <div>
-            <label
-              htmlFor="reg-confirm"
-              style={{ display: "block", fontSize: "13px", color: "var(--text-secondary)", marginBottom: "6px" }}
-            >
-              Confirmação de senha
-            </label>
-            <input
-              id="reg-confirm"
-              type={showPassword ? "text" : "password"}
-              placeholder="Repita a senha"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+            <Field id="reg-confirm" label="Confirmar senha" icon={Lock}>
+              <input
+                id="reg-confirm"
+                type={showPassword ? "text" : "password"}
+                placeholder="Repita a senha"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={loading}
+                autoComplete="new-password"
+                className="login-input login-input-pwd"
+              />
+              {eyeButton}
+            </Field>
+
+            {password.length > 0 && (
+              <div className="login-fade-up" style={delay(0.05)}>
+                <PasswordChecklist password={password} confirmPassword={confirmPassword} />
+              </div>
+            )}
+
+            <button
+              type="submit"
               disabled={loading}
-              autoComplete="new-password"
-              required
-            />
-          </div>
-
-          {/* Indicador de requisitos de senha */}
-          <div
-            style={{
-              backgroundColor: "var(--bg-surface-elevated)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-xs)",
-              border: "1px solid var(--border-subtle)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-              fontSize: "12px",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                color: hasMinLen ? "var(--success-green)" : "var(--text-secondary)",
-              }}
+              className="login-btn login-btn-shimmer flex h-12 w-full items-center justify-center gap-2.5 rounded-lg bg-[#E11D48] text-[14px] font-semibold text-white shadow-[0_6px_24px_-8px_rgba(225,29,72,0.6)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {hasMinLen ? <Check size={14} /> : <X size={14} />} Pelo menos 6 caracteres
-            </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                color: hasNumber ? "var(--success-green)" : "var(--text-secondary)",
-              }}
-            >
-              {hasNumber ? <Check size={14} /> : <X size={14} />} Pelo menos um número
-            </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                color: passwordsMatch ? "var(--success-green)" : "var(--text-secondary)",
-              }}
-            >
-              {passwordsMatch ? <Check size={14} /> : <X size={14} />} As senhas coincidem
-            </div>
-          </div>
+              {loading ? (
+                <>
+                  <Loader2 size={17} className="animate-spin" />
+                  Criando conta...
+                </>
+              ) : (
+                <>
+                  Criar conta
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </form>
 
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={loading}
-            style={{ width: "100%", marginTop: "6px" }}
-          >
-            {loading ? "Registrando..." : "Criar sua conta!"}
-            {!loading && <ArrowRight size={16} />}
-          </button>
-        </form>
-
-        <div style={{ textAlign: "center", fontSize: "12px", color: "#555a66" }}>
-          * Contas criadas possuem perfil de operador. Privilégios administrativos são configurados via painel de sistema.
+          <p className="login-fade-up mt-8 border-t border-white/[0.06] pt-6 text-center text-[13px] text-slate-500" style={delay(0.3)}>
+            Contas criadas possuem perfil de operador. Privilégios administrativos são
+            configurados via painel de sistema.
+          </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

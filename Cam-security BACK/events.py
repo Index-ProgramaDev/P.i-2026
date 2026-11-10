@@ -23,6 +23,9 @@ class Event:
     yolo_summary:    str
     frame:           object = None
     yolo_detections: object = None
+    event_id:        str = None  # ← ID do evento salvo
+    camera_uid:      str = "cam_default"  # ← Câmera que gerou o evento
+    user_id:         Optional[int] = None
 
 
 class EventManager:

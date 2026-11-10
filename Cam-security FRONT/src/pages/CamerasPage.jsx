@@ -70,6 +70,26 @@ export default function CamerasPage() {
     };
   }, [user]);
 
+  // Comandos de teclado: R atualiza · troca de câmera via Layout (1-9, [ ])
+  useEffect(() => {
+    const onKey = (e) => {
+      if (showAddModal || pendingAnomaly || fullScreenCam) return;
+      const t = e.target;
+      if (t && (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable)) return;
+
+      if (e.key.toLowerCase() === "r") {
+        loadData();
+      }
+    };
+    const onCamChanged = () => loadData();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("camsec:camera-changed", onCamChanged);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("camsec:camera-changed", onCamChanged);
+    };
+  }, [showAddModal, pendingAnomaly, fullScreenCam]);
+
   const connectWebSocket = () => {
     try {
       const ws = new WebSocket(api.wsUrl);
@@ -85,6 +105,7 @@ export default function CamerasPage() {
           // Se for anomalia confirmada, mostra o modal de confirmação
           if (data.type === "ALERT" && data.kind === "ANOMALY_CONFIRMED") {
             setPendingAnomaly({
+              id: data.id,
               kind: data.kind,
               timestamp: data.timestamp,
               score: data.score,
@@ -113,12 +134,17 @@ export default function CamerasPage() {
 
   const handleConfirmAnomaly = async (event, justification) => {
     try {
+      if (!event.id) {
+        throw new Error("Evento sem ID - não é possível confirmar");
+      }
+      
       await api.confirmAnomalyFromOperator({
         decision: "confirmado",
         operator: user?.username || "operador",
         justification: justification,
+        event_id: event.id,  // ← Envia o ID do evento
       });
-      console.log("Anomalia confirmada e salva no banco");
+      console.log("Anomalia confirmada e salva no banco:", event.id);
     } catch (err) {
       console.error("Erro ao confirmar anomalia:", err);
       throw err;
@@ -127,12 +153,17 @@ export default function CamerasPage() {
 
   const handleRejectAnomaly = async (event, justification) => {
     try {
+      if (!event.id) {
+        throw new Error("Evento sem ID - não é possível rejeitar");
+      }
+      
       await api.confirmAnomalyFromOperator({
         decision: "falso_positivo",
         operator: user?.username || "operador",
         justification: justification,
+        event_id: event.id,  // ← Envia o ID do evento
       });
-      console.log("Anomalia marcada como falso positivo");
+      console.log("Anomalia marcada como falso positivo:", event.id);
     } catch (err) {
       console.error("Erro ao rejeitar anomalia:", err);
       throw err;
@@ -221,6 +252,14 @@ export default function CamerasPage() {
   // Câmera está realmente ativa e capturando?
   const isCameraLive = Boolean(cameraStatus && cameraStatus.running);
 
+  const friendlySource = (src) => {
+    if (!src) return "—";
+    const match = cameras.find((c) => c.source === src || c.camera_uid === src);
+    if (match?.name) return match.name;
+    const base = String(src).split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, "");
+    return base.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()) || String(src);
+  };
+
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       {/* Topo */}
@@ -229,6 +268,23 @@ export default function CamerasPage() {
           <h1 style={{ fontSize: "22px", fontWeight: 600 }}>Câmeras do Sistema</h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
             Visualização de câmeras conectadas, mosaico operacional e modo tela cheia.
+          </p>
+          <p
+            style={{
+              marginTop: "6px",
+              fontSize: "11px",
+              fontFamily: "monospace",
+              color: "#64748b",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ border: "1px solid var(--border-subtle)", borderRadius: "4px", padding: "1px 6px", backgroundColor: "rgba(255,255,255,0.03)" }}>1-9</span> trocar câmera
+            <span style={{ border: "1px solid var(--border-subtle)", borderRadius: "4px", padding: "1px 6px", backgroundColor: "rgba(255,255,255,0.03)" }}>[ ]</span> ciclar
+            <span style={{ border: "1px solid var(--border-subtle)", borderRadius: "4px", padding: "1px 6px", backgroundColor: "rgba(255,255,255,0.03)" }}>R</span> atualizar
+            <span style={{ border: "1px solid var(--border-subtle)", borderRadius: "4px", padding: "1px 6px", backgroundColor: "rgba(255,255,255,0.03)" }}>?</span> todos os atalhos
           </p>
         </div>
 
@@ -339,8 +395,11 @@ export default function CamerasPage() {
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <span className="pulse-dot online" />
                     <span style={{ fontSize: "13px", fontWeight: 600 }}>Câmera Ativa</span>
-                    <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                      ({cameraStatus?.source || "0"})
+                    <span
+                      style={{ fontSize: "11px", color: "var(--text-secondary)" }}
+                      title={cameraStatus?.source}
+                    >
+                      ({friendlySource(cameraStatus?.source)})
                     </span>
                   </div>
 

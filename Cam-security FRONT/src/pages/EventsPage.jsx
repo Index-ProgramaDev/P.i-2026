@@ -110,6 +110,10 @@ export default function EventsPage() {
             Analise eventos detectados e classifique como anomalia confirmada ou falso positivo
           </p>
         </div>
+
+        <button onClick={fetchEvents} className="btn-secondary" style={{ height: "38px" }} disabled={loading}>
+          <RefreshCw size={14} className={loading ? "spin" : ""} /> Atualizar
+        </button>
       </div>
 
       {/* Stats */}
@@ -297,7 +301,7 @@ export default function EventsPage() {
                       ? "✓ Confirmada"
                       : status === "falso_positivo"
                       ? "✗ Falso Positivo"
-                      : "⏳ Aguardando"}
+                      : "Aguardando"}
                   </span>
                 </div>
 

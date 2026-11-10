@@ -73,9 +73,7 @@ export default function AlertReviewPage() {
     const confirmMsg =
       decision === "confirmado"
         ? "Deseja confirmar este evento como INCIDENTE REAL?"
-        : decision === "investigacao"
-        ? "Deseja marcar este evento para INVESTIGAÇÃO APROFUNDADA?"
-        : "Deseja descartar este alerta como FALSO POSITIVO? (O vídeo e frame continuarão preservados)";
+        : "Deseja descartar este alerta como FALSO POSITIVO?";
 
     if (!window.confirm(confirmMsg)) return;
 

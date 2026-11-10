@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import psycopg
 from psycopg.rows import dict_row
@@ -188,6 +189,42 @@ class NeonDatabase:
         except Exception as e:
             logger.error("Erro ao listar câmeras: %s", e)
             return []
+
+    @staticmethod
+    def _normalize_camera_source(source: Any) -> str:
+        value = str(source or "").strip()
+        if not value or value.isdigit() or "://" in value:
+            return value.rstrip("/")
+        return str(Path(value).expanduser().resolve())
+
+    def find_camera_by_source(self, source: Any) -> Optional[Dict[str, Any]]:
+        """Resolve the owner of a registered active camera from its capture source."""
+        if not self._enabled:
+            return None
+
+        source_key = self._normalize_camera_source(source)
+        if not source_key:
+            return None
+
+        sql = "SELECT camera_uid, user_id, source FROM cameras WHERE is_active = TRUE;"
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                    rows = cur.fetchall()
+
+            matches = {
+                (row["camera_uid"], row["user_id"]): row
+                for row in rows
+                if self._normalize_camera_source(row["source"]) == source_key
+            }
+            if len(matches) > 1:
+                logger.warning("Fonte de câmera registrada por mais de um proprietário: %s", source)
+                return None
+            return next(iter(matches.values()), None)
+        except Exception as e:
+            logger.error("Erro ao localizar proprietário da câmera %s: %s", source, e)
+            return None
 
     def delete_camera(self, camera_uid: str, user_id: int) -> bool:
         """Remove uma câmera vinculada ao usuário."""
@@ -405,4 +442,3 @@ class NeonDatabase:
         except Exception as e:
             logger.error("Erro ao truncar eventos: %s", e)
             return 0
-

@@ -49,7 +49,7 @@ class StorageManager:
         if fps > 0 and fps != self._vid_fps:
             self._vid_fps = fps
 
-    def save_event(self, event, camera_uid: str = "cam_default", user_id: Optional[int] = None) -> Path:
+    def save_event(self, event, camera_uid: Optional[str] = None, user_id: Optional[int] = None) -> Path:
         """Salva snapshot e agenda gravação do clipe de vídeo do evento.
         APENAS para eventos já revisados/confirmados.
         """
@@ -57,6 +57,10 @@ class StorageManager:
 
         with self._lock:
             seq_str = f"{self._event_count + 1:04d}"
+            event.event_id = seq_str  # ← Atualiza o ID no evento
+            event.camera_uid = camera_uid or event.camera_uid or "cam_default"
+            user_id = user_id if user_id is not None else event.user_id
+            
             ts_str = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d_%H-%M-%S")
             event_dir = self._events_dir / f"{ts_str}_{seq_str}"
             event_dir.mkdir(parents=True, exist_ok=True)
@@ -85,7 +89,7 @@ class StorageManager:
             if self._db and self._db.is_enabled():
                 self._db.insert_event(
                     event_id=seq_str,
-                    camera_uid=camera_uid,
+                    camera_uid=event.camera_uid,
                     user_id=user_id,
                     kind=event.kind.name,
                     timestamp=time.time(),

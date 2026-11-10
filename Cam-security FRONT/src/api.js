@@ -136,8 +136,11 @@ export const api = {
     return data;
   },
 
-  async confirmAnomalyFromOperator({ decision, operator = "operador", justification = "" }) {
-    const res = await fetch(`${API_BASE}/events/confirm-anomaly`, {
+  async confirmAnomalyFromOperator({ decision, operator = "operador", justification = "", event_id }) {
+    if (!event_id) {
+      throw new Error("event_id é obrigatório");
+    }
+    const res = await fetch(`${API_BASE}/events/confirm-anomaly?event_id=${event_id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision, operator, justification }),
