@@ -294,4 +294,3 @@ Pull requests são bem-vindos! Para mudanças grandes, abra uma issue primeiro.
 ---
 
 **Desenvolvido com ❤️ usando Python, FastAPI, React e OpenCV**
-
