@@ -1,4 +1,5 @@
 import argparse
+import os
 import logging
 import sys
 import time
@@ -20,7 +21,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-# Logger principal em INFO, outros em WARNING
 logging.getLogger("camsecurity.main").setLevel(logging.INFO)
 logger = logging.getLogger("camsecurity.main")
 
@@ -34,7 +34,6 @@ class SharedState:
         self._captured_at = 0.0
         self._lock = threading.Lock()
 
-        # Metadados da IA — trocados atomicamente (sem lock)
         self._ai_meta = {
             "detections": [], "ucf_score": None,
             "is_anomalous": False, "yolo_ms": 0.0, "ucf_ms": 0.0, "ready": False,
@@ -42,7 +41,6 @@ class SharedState:
         self._latest_result = None
         self._shutdown = False
 
-        # Contadores de FPS
         self._cap_fps = 0.0
         self._cap_frames = 0
         self._cap_start = time.perf_counter()
@@ -108,6 +106,8 @@ def load_config(path: str = "config.yaml") -> dict:
         sys.exit(1)
     with open(p, encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
+    if os.getenv("CAMSEC_VIDEO_PATH"):
+        cfg["video_path"] = os.environ["CAMSEC_VIDEO_PATH"]
     logger.info("Config carregado: %s", p)
     return cfg
 
@@ -193,10 +193,8 @@ def run(
     events = EventManager(config)
     storage = StorageManager(config)
 
-    # Neon Database
     db = NeonDatabase()
 
-    # Servidor Web / API REST / WebSocket / Streaming
     server = None
     uvi_server = None
     if enable_server:
@@ -216,7 +214,7 @@ def run(
                 port=server_port,
                 log_level="warning",
                 access_log=False,
-                ws="websockets",  # ← Força uso do websockets
+                ws="websockets",
             )
             nonlocal uvi_server
             uvi_server = uvicorn.Server(uvi_config)
@@ -252,12 +250,22 @@ def run(
         if server:
             server.broadcast_event({
                 "type": "ALERT",
-                "id": event.event_id,  # ← Adiciona o ID do evento
+                "id": event.event_id,
                 "kind": event.kind.name,
-                "timestamp": event.timestamp,
+                "timestamp": time.time(),
                 "score": float(event.ucf_score),
                 "detections": event.yolo_summary,
+                "detections_list": [
+                    {
+                        "class_name": d.class_name,
+                        "confidence": float(d.confidence),
+                        "track_id": d.track_id,
+                        "box": [int(v) for v in d.bbox],
+                    }
+                    for d in (event.yolo_detections or [])
+                ],
                 "camera_uid": event.camera_uid,
+                "user_id": getattr(event, "user_id", None),
             })
 
     events.on_event(_on_confirmado)
@@ -265,7 +273,6 @@ def run(
     logger.info("Iniciando captura...")
     camera.start()
 
-    # Aguarda o primeiro frame (até 2s)
     for _ in range(20):
         frame, _, _ = state.get_frame_for_ai()
         if frame is not None:
@@ -274,7 +281,6 @@ def run(
     else:
         logger.error("Nenhum frame recebido após 2 segundos!")
 
-    # Ajusta FPS real da fonte
     if camera.real_fps != vid_fps:
         buf.resize_buffer(camera.real_fps)
 
@@ -339,7 +345,7 @@ def main():
     parser.add_argument("--display", action="store_true", help="Abre janela gráfica do OpenCV no desktop")
     parser.add_argument("--no-server", action="store_true", help="Desativa o servidor FastAPI/WebSocket")
     parser.add_argument("--port", type=int, default=8000, help="Porta do servidor Web (padrão: 8000)")
-    parser.add_argument("--host", default="0.0.0.0", help="Host do servidor Web (padrão: 0.0.0.0)")
+    parser.add_argument("--host", default=os.getenv("CAMSEC_HOST", "0.0.0.0"), help="Host do servidor Web (env CAMSEC_HOST)")
     args = parser.parse_args()
     run(
         load_config(args.config),

@@ -57,7 +57,7 @@ class StorageManager:
 
         with self._lock:
             seq_str = f"{self._event_count + 1:04d}"
-            event.event_id = seq_str  # ← Atualiza o ID no evento
+            event.event_id = seq_str
             event.camera_uid = camera_uid or event.camera_uid or "cam_default"
             user_id = user_id if user_id is not None else event.user_id
             
@@ -85,8 +85,18 @@ class StorageManager:
                 )
                 video_rel = str(video_path.relative_to(self._events_dir.parent))
 
-            # Persiste diretamente no Neon PostgreSQL
             if self._db and self._db.is_enabled():
+                detections_meta = []
+                for d in (event.yolo_detections or []):
+                    try:
+                        detections_meta.append({
+                            "class_name": d.class_name,
+                            "confidence": float(d.confidence),
+                            "track_id": d.track_id,
+                            "box": [int(v) for v in d.bbox],
+                        })
+                    except Exception:
+                        continue
                 self._db.insert_event(
                     event_id=seq_str,
                     camera_uid=event.camera_uid,
@@ -98,7 +108,12 @@ class StorageManager:
                     detections=event.yolo_summary,
                     frame_path=frame_rel,
                     video_path=video_rel,
-                    metadata={"source": "camsecurity", "status": "pending", "awaiting_review": True},
+                    metadata={
+                        "source": "camsecurity",
+                        "status": "pendente",
+                        "awaiting_review": True,
+                        "detections": detections_meta,
+                    },
                 )
 
             self._event_count += 1

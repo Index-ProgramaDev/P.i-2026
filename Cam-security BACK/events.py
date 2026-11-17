@@ -1,5 +1,4 @@
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -23,8 +22,8 @@ class Event:
     yolo_summary:    str
     frame:           object = None
     yolo_detections: object = None
-    event_id:        str = None  # ← ID do evento salvo
-    camera_uid:      str = "cam_default"  # ← Câmera que gerou o evento
+    event_id:        str = None
+    camera_uid:      str = "cam_default"
     user_id:         Optional[int] = None
 
 

@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+storage/
+video/
+*.log
+.git/
+.gitignore
+_smoke_test.py

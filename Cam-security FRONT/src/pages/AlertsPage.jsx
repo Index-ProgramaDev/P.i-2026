@@ -2,16 +2,24 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw, ArrowRight, CheckCircle2 } from "lucide-react";
 import { api } from "../api";
+import { useAuth } from "../context/AuthContext";
 
 export default function AlertsPage() {
+  const { user } = useAuth();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
 
+  const normStatus = (st) => (st === "pending" ? "pendente" : st || "pendente");
+
   const loadAlerts = async () => {
     setLoading(true);
     try {
-      const data = await api.getEvents({ limit: 100 });
+      const data = await api.getEvents({
+        limit: 100,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
+      });
       setEvents(data.items || []);
     } catch (e) {
       console.error(e);
@@ -22,11 +30,11 @@ export default function AlertsPage() {
 
   useEffect(() => {
     loadAlerts();
-  }, []);
+  }, [user]);
 
   const filteredEvents = events.filter((ev) => {
     const meta = typeof ev.metadata === "string" ? JSON.parse(ev.metadata || "{}") : (ev.metadata || {});
-    const st = meta.status || "pendente";
+    const st = normStatus(meta.status);
     if (filterStatus === "all") return true;
     return st === filterStatus;
   });
@@ -83,7 +91,7 @@ export default function AlertsPage() {
             <tbody>
               {filteredEvents.map((ev) => {
                 const meta = typeof ev.metadata === "string" ? JSON.parse(ev.metadata || "{}") : (ev.metadata || {});
-                const status = meta.status || "pendente";
+                const status = normStatus(meta.status);
                 const score = ev.ucf_score !== null && ev.ucf_score !== undefined ? `${(ev.ucf_score * 100).toFixed(0)}%` : "N/A";
                 const isHigh = (ev.ucf_score || 0) > 0.65;
 

@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -94,19 +95,48 @@ class NeonDatabase:
             logger.error("Falha ao inicializar schema Neon: %s", e)
             self._enabled = False
 
-    # ── Módulo de Usuários e Autenticação ────────────────────────────────────
+
+    _PBKDF2_ITERATIONS = 200_000
+
+    @classmethod
+    def _hash_password_pbkdf2(cls, password: str) -> tuple[str, str]:
+        salt = secrets.token_bytes(16)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, cls._PBKDF2_ITERATIONS)
+        stored = f"pbkdf2${cls._PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+        return stored, salt.hex()
 
     @staticmethod
-    def _hash_password(password: str, salt: Optional[str] = None) -> tuple[str, str]:
+    def _hash_password_legacy(password: str, salt: Optional[str] = None) -> tuple[str, str]:
         salt = salt or secrets.token_hex(16)
         pw_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
         return pw_hash, salt
 
+    @classmethod
+    def _verify_password(cls, password: str, stored_hash: str, salt: str) -> bool:
+        if stored_hash.startswith("pbkdf2$"):
+            try:
+                _, iters, salt_hex, hash_hex = stored_hash.split("$", 3)
+                dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iters))
+                return hmac.compare_digest(dk.hex(), hash_hex)
+            except Exception:
+                return False
+        expected, _ = cls._hash_password_legacy(password, salt)
+        return hmac.compare_digest(expected, stored_hash)
+
+    def _upgrade_password_hash(self, user_id: int, password: str) -> None:
+        try:
+            new_hash, _ = self._hash_password_pbkdf2(password)
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE users SET password_hash = %(h)s WHERE id = %(uid)s",
+                                {"h": new_hash, "uid": user_id})
+        except Exception as e:
+            logger.warning("Falha ao atualizar hash do usuário %s: %s", user_id, e)
+
     def register_user(self, username: str, email: str, password: str) -> Optional[Dict[str, Any]]:
-        """Registra novo usuário com hash SHA-256 e salt seguro."""
         if not self._enabled:
             return None
-        pw_hash, salt = self._hash_password(password)
+        pw_hash, salt = self._hash_password_pbkdf2(password)
         sql = """
         INSERT INTO users (username, email, password_hash, salt)
         VALUES (%(username)s, %(email)s, %(pw_hash)s, %(salt)s)
@@ -125,7 +155,6 @@ class NeonDatabase:
             return None
 
     def authenticate_user(self, username_or_email: str, password: str) -> Optional[Dict[str, Any]]:
-        """Autentica usuário verificando salt e hash de senha."""
         if not self._enabled:
             return None
         sql = "SELECT * FROM users WHERE username = %(key)s OR email = %(key)s LIMIT 1;"
@@ -136,20 +165,34 @@ class NeonDatabase:
                     u = cur.fetchone()
                     if not u or not u.get("is_active"):
                         return None
-                    expected_hash, _ = self._hash_password(password, u["salt"])
-                    if expected_hash == u["password_hash"]:
-                        return {
-                            "id": u["id"],
-                            "username": u["username"],
-                            "email": u["email"],
-                            "created_at": u["created_at"].isoformat() if isinstance(u.get("created_at"), datetime) else None,
-                        }
-                    return None
+                    if not self._verify_password(password, u["password_hash"], u["salt"]):
+                        return None
+                    if not u["password_hash"].startswith("pbkdf2$"):
+                        self._upgrade_password_hash(u["id"], password)
+                    return {
+                        "id": u["id"],
+                        "username": u["username"],
+                        "email": u["email"],
+                        "created_at": u["created_at"].isoformat() if isinstance(u.get("created_at"), datetime) else None,
+                    }
         except Exception as e:
             logger.error("Erro na autenticação: %s", e)
             return None
 
-    # ── Módulo de Câmeras (Multi-Camera Isoladas por Usuário) ─────────────────
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Retorna dados básicos do usuário pelo ID (para validação de ownership)."""
+        if not self._enabled:
+            return None
+        sql = "SELECT id, username, email, is_active FROM users WHERE id = %(uid)s LIMIT 1;"
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, {"uid": int(user_id)})
+                    return cur.fetchone()
+        except Exception as e:
+            logger.error("Erro ao buscar usuário %s: %s", user_id, e)
+            return None
+
 
     def register_camera(self, camera_uid: str, name: str, source: str, user_id: int) -> Optional[int]:
         """Vincula uma nova câmera a um usuário para isolamento de stream e alertas."""
@@ -240,7 +283,6 @@ class NeonDatabase:
             logger.error("Erro ao deletar câmera %s: %s", camera_uid, e)
             return False
 
-    # ── Módulo de Eventos ───────────────────────────────────────────────────
 
     def insert_event(
         self,

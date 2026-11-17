@@ -125,6 +125,33 @@ function Rail({ pendingAlerts, isRecording, onOpenPalette, onLogout }) {
   );
 }
 
+function MobileNav({ pendingAlerts }) {
+  const location = useLocation();
+
+  const isActive = (path) =>
+    location.pathname === path || (path === "/dashboard" && location.pathname === "/");
+
+  return (
+    <nav className="mobile-nav" aria-label="Navegação principal">
+      {NAV_ITEMS.map(({ name, path, icon: Icon }) => (
+        <NavLink
+          key={path}
+          to={path}
+          className={`mobile-nav-item${isActive(path) ? " active" : ""}`}
+        >
+          <span style={{ position: "relative", display: "inline-flex" }}>
+            <Icon size={20} />
+            {path === "/alerts" && pendingAlerts > 0 && (
+              <span className="rail-badge">{pendingAlerts > 99 ? "99+" : pendingAlerts}</span>
+            )}
+          </span>
+          <span>{name}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
 function UserMenu({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -149,7 +176,7 @@ function UserMenu({ user, onLogout }) {
     <div ref={ref} style={{ position: "relative" }}>
       <button type="button" className="user-btn" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open}>
         <span className="avatar">{initials || "OP"}</span>
-        <span style={{ textAlign: "left", lineHeight: 1.15, maxWidth: 140 }}>
+        <span className="user-meta" style={{ textAlign: "left", lineHeight: 1.15, maxWidth: 140 }}>
           <span style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#e2e8f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {user?.username || "Operador"}
           </span>
@@ -417,7 +444,6 @@ export default function Layout() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
-  // Botão "?" da rail abre o modal de atalhos
   useEffect(() => {
     const onToggle = () => setShortcutsOpen((v) => !v);
     window.addEventListener("camsec:toggle-shortcuts", onToggle);
@@ -442,10 +468,14 @@ export default function Layout() {
         }
         setCameras(cams);
 
-        const eventsRes = await api.getEvents({ limit: 50 }).catch(() => ({ items: [] }));
+        const eventsRes = await api.getEvents({
+          limit: 50,
+          user_id: user?.id || null,
+          user_email: user?.email || null,
+        }).catch(() => ({ items: [] }));
         const pending = (eventsRes.items || []).filter((e) => {
           const meta = typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {});
-          return !meta.status || meta.status === "pendente";
+          return !meta.status || meta.status === "pendente" || meta.status === "pending";
         }).length;
         setPendingAlerts(pending);
       } catch {
@@ -458,7 +488,6 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [user]);
 
-  // Atalhos globais: Ctrl+K paleta · D/C/A/E navegação · 1-9 troca câmera · [ ] cicla
   useEffect(() => {
     const NAV_KEYS = { d: "/dashboard", c: "/cameras", a: "/alerts", e: "/events" };
 
@@ -535,42 +564,41 @@ export default function Layout() {
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Command Center Topbar */}
         <header className="topbar">
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              className="hud-chip"
+              className="hud-chip mob-hide"
               style={{ cursor: "pointer", color: "#64748b" }}
               title="Abrir paleta de comandos (Ctrl+K)"
             >
               <Search size={12} />
-              Buscar ou comando
+              <span className="chip-label">Buscar ou comando</span>
               <span className="palette-kbd">Ctrl K</span>
             </button>
             <button
               type="button"
               onClick={() => setShortcutsOpen(true)}
-              className="hud-chip"
+              className="hud-chip mob-hide"
               style={{ cursor: "pointer", color: "#94a3b8" }}
               title="Atalhos de teclado"
               aria-label="Mostrar atalhos de teclado"
             >
               <Keyboard size={12} />
-              Atalhos
+              <span className="chip-label">Atalhos</span>
               <span className="palette-kbd">?</span>
             </button>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            <span className="hud-chip" title="Câmeras online">
+            <span className="hud-chip mob-hide" title="Câmeras online">
               <Camera size={12} />
-              Cams <strong>{onlineCams}/{totalCams}</strong>
+              <span className="chip-label">Cams</span> <strong>{onlineCams}/{totalCams}</strong>
             </span>
-            <span className={`hud-chip${pendingAlerts > 0 ? " alerts" : ""}`} title="Alertas pendentes de triagem">
+            <span className={`hud-chip mob-hide${pendingAlerts > 0 ? " alerts" : ""}`} title="Alertas pendentes de triagem">
               <Bell size={12} />
-              Alertas <strong>{pendingAlerts}</strong>
+              <span className="chip-label">Alertas</span> <strong>{pendingAlerts}</strong>
             </span>
             <SystemClock />
             <span style={{ width: 1, height: 22, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
@@ -578,10 +606,12 @@ export default function Layout() {
           </div>
         </header>
 
-        <main style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+        <main className="app-main" style={{ flex: 1, overflowY: "auto" }}>
           <Outlet />
         </main>
       </div>
+
+      <MobileNav pendingAlerts={pendingAlerts} />
 
       <CommandPalette
         open={paletteOpen}

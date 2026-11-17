@@ -1,11 +1,65 @@
-const API_BASE = "http://127.0.0.1:8000";
-const WS_BASE = "ws://127.0.0.1:8000/ws/events";
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const WS_BASE = API_BASE.replace(/^http/, "ws") + "/ws/events";
+
+let _token = null;
+
+export function setAuthToken(token) {
+  _token = token || null;
+}
+
+export function getAuthToken() {
+  return _token;
+}
+
+export function clearAuthToken() {
+  _token = null;
+}
+
+function authHeaders(hasBody = false) {
+  const headers = {};
+  if (_token) headers["Authorization"] = `Bearer ${_token}`;
+  if (hasBody) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+function requestHeaders(hasBody, auth) {
+  const headers = auth ? authHeaders(hasBody) : {};
+  if (hasBody && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+function withToken(url) {
+  if (!_token) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(_token)}`;
+}
+
+async function req(path, { method = "GET", body = null, auth = true, raw = false } = {}) {
+  const headers = requestHeaders(body != null, auth);
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (raw) return res;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && auth) {
+      window.dispatchEvent(new Event("camsec:unauthorized"));
+    }
+    const err = new Error(data.detail || `Erro na requisição (código ${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
 
 export const api = {
   baseUrl: API_BASE,
-  wsUrl: WS_BASE,
 
-  // Health
+  getWsUrl() {
+    return withToken(WS_BASE);
+  },
+
   async getHealth() {
     try {
       const res = await fetch(`${API_BASE}/health`);
@@ -15,170 +69,89 @@ export const api = {
     }
   },
 
-  // Auth (com tratamento de HTTP 400/401/503 e extração de detail)
   async login(username_or_email, password) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    return req("/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username_or_email, password }),
+      body: { username_or_email, password },
+      auth: false,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || `Erro na autenticação (código ${res.status})`);
-    }
-    return data;
   },
 
   async register(username, email, password) {
-    const res = await fetch(`${API_BASE}/auth/register`, {
+    return req("/auth/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password }),
+      body: { username, email, password },
+      auth: false,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || `Erro no cadastro (código ${res.status})`);
-    }
-    return data;
   },
 
-  // Cameras
-  async getCameras(userId) {
-    const res = await fetch(`${API_BASE}/cameras?user_id=${userId}`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "Falha ao carregar câmeras");
-    }
-    return res.json();
+  async getCameras() {
+    return req("/cameras");
   },
 
-  async registerCamera(camera_uid, name, source, user_id) {
-    const res = await fetch(`${API_BASE}/cameras`, {
+  async registerCamera(camera_uid, name, source, user_id = null) {
+    return req("/cameras", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ camera_uid, name, source, user_id }),
+      body: { camera_uid, name, source, user_id },
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "Falha ao vincular câmera");
-    }
-    return data;
   },
 
-  async deleteCamera(camera_uid, user_id) {
-    const res = await fetch(`${API_BASE}/cameras/${camera_uid}?user_id=${user_id}`, {
-      method: "DELETE",
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "Falha ao remover câmera");
-    }
-    return data;
+  async deleteCamera(camera_uid, user_id = null) {
+    const qs = user_id ? `?user_id=${user_id}` : "";
+    return req(`/cameras/${camera_uid}${qs}`, { method: "DELETE" });
   },
 
   async getCameraStatus() {
-    const res = await fetch(`${API_BASE}/camera/status`);
-    return res.json();
+    return req("/camera/status");
   },
 
   async switchCamera(source) {
-    const res = await fetch(`${API_BASE}/camera/switch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "Falha ao alterar fonte");
-    }
-    return data;
+    return req("/camera/switch", { method: "POST", body: { source } });
   },
 
-  // Events & Alerts
-  async getEvents({ minScore = 0.0, limit = 50, offset = 0, kind = null, camera_uid = null, user_id = null, user_email = null } = {}) {
-    let url = `${API_BASE}/events?limit=${limit}&offset=${offset}`;
+  async getEvents({ minScore = 0.0, limit = 50, offset = 0, kind = null, camera_uid = null, user_id = null } = {}) {
+    let url = `/events?limit=${limit}&offset=${offset}`;
     if (minScore > 0) url += `&min_score=${minScore}`;
     if (kind) url += `&kind=${encodeURIComponent(kind)}`;
     if (camera_uid) url += `&camera_uid=${encodeURIComponent(camera_uid)}`;
     if (user_id) url += `&user_id=${user_id}`;
-    if (user_email) url += `&requesting_user_email=${encodeURIComponent(user_email)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
+    try {
+      return await req(url);
+    } catch {
       return { total: 0, items: [] };
     }
-    return res.json();
   },
 
-  async getEventById(eventId, user_id = null, user_email = null) {
-    let url = `${API_BASE}/events/${eventId}`;
-    const params = [];
-    if (user_id) params.push(`user_id=${user_id}`);
-    if (user_email) params.push(`requesting_user_email=${encodeURIComponent(user_email)}`);
-    if (params.length > 0) url += `?${params.join('&')}`;
-    
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error("Evento não encontrado");
-    }
-    return res.json();
+  async getEventById(eventId) {
+    return req(`/events/${eventId}`);
   },
 
-  async reviewEvent(eventId, { decision, operator = "operador", justification = "" }) {
-    const res = await fetch(`${API_BASE}/events/${eventId}/review`, {
+  async reviewEvent(eventId, { decision, operator = "operador", justification = "" } = {}) {
+    return req(`/events/${eventId}/review`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, operator, justification }),
+      body: { decision, operator, justification },
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "Falha ao salvar decisão");
-    }
-    return data;
   },
 
-  async confirmAnomalyFromOperator({ decision, operator = "operador", justification = "", event_id }) {
+  async confirmAnomalyFromOperator({ decision, operator = "operador", justification = "", event_id } = {}) {
     if (!event_id) {
       throw new Error("event_id é obrigatório");
     }
-    const res = await fetch(`${API_BASE}/events/confirm-anomaly?event_id=${event_id}`, {
+    return req(`/events/confirm-anomaly?event_id=${encodeURIComponent(event_id)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, operator, justification }),
+      body: { decision, operator, justification },
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.detail || "Falha ao salvar decisão");
-    }
-    return data;
-  },
-
-  async getLocalEvidences() {
-    const res = await fetch(`${API_BASE}/evidencias/local`);
-    if (!res.ok) {
-      return { total: 0, items: [] };
-    }
-    return res.json();
   },
 
   getStreamUrl(overlays = true) {
-    return `${API_BASE}/stream?overlays=${overlays}`;
+    return withToken(`${API_BASE}/stream?overlays=${overlays}`);
   },
 
-  getEventFrameUrl(eventId, user_id = null, user_email = null) {
-    let url = `${API_BASE}/events/${eventId}/frame`;
-    const params = [];
-    if (user_id) params.push(`user_id=${user_id}`);
-    if (user_email) params.push(`requesting_user_email=${encodeURIComponent(user_email)}`);
-    if (params.length > 0) url += `?${params.join('&')}`;
-    return url;
+  getEventFrameUrl(eventId) {
+    return withToken(`${API_BASE}/events/${eventId}/frame`);
   },
 
-  getEventVideoUrl(eventId, user_id = null, user_email = null) {
-    let url = `${API_BASE}/events/${eventId}/video`;
-    const params = [];
-    if (user_id) params.push(`user_id=${user_id}`);
-    if (user_email) params.push(`requesting_user_email=${encodeURIComponent(user_email)}`);
-    if (params.length > 0) url += `?${params.join('&')}`;
-    return url;
+  getEventVideoUrl(eventId) {
+    return withToken(`${API_BASE}/events/${eventId}/video`);
   },
 };

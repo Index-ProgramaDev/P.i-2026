@@ -110,6 +110,8 @@ npm install
 Crie um arquivo `.env` em `Cam-security BACK/`:
 ```env
 Neon_KEY=postgresql://user:password@host/database?sslmode=require
+
+(To deixando a key aberta msm, é um banco temporario.)
 ```
 
 ---

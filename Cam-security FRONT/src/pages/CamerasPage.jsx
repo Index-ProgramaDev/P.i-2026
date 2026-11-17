@@ -12,10 +12,9 @@ import {
   Minimize2,
   Trash2,
   X,
-  CheckCircle,
-  XCircle,
 } from "lucide-react";
 import AnomalyAlert from "../components/AnomalyAlert";
+import { useAlertSocket } from "../hooks/useAlertSocket";
 
 export default function CamerasPage() {
   const { user } = useAuth();
@@ -24,21 +23,21 @@ export default function CamerasPage() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState({ text: "", type: "" });
 
-  // Modo tela cheia
   const [fullScreenCam, setFullScreenCam] = useState(null);
   const gridContainerRef = useRef(null);
 
-  // Modal de adicionar câmera
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Formulário de nova câmera
   const [uid, setUid] = useState("");
   const [name, setName] = useState("");
   const [source, setSource] = useState("");
 
-  // Pop-up de anomalia
   const [pendingAnomaly, setPendingAnomaly] = useState(null);
-  const wsRef = useRef(null);
+
+  useAlertSocket({
+    user,
+    onAnomaly: (a) => setPendingAnomaly(a),
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -59,18 +58,8 @@ export default function CamerasPage() {
 
   useEffect(() => {
     loadData();
-    
-    // Conecta WebSocket para alertas em tempo real
-    connectWebSocket();
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
   }, [user]);
 
-  // Comandos de teclado: R atualiza · troca de câmera via Layout (1-9, [ ])
   useEffect(() => {
     const onKey = (e) => {
       if (showAddModal || pendingAnomaly || fullScreenCam) return;
@@ -90,48 +79,6 @@ export default function CamerasPage() {
     };
   }, [showAddModal, pendingAnomaly, fullScreenCam]);
 
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket(api.wsUrl);
-      
-      ws.onopen = () => {
-        console.log("WebSocket conectado para alertas");
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Se for anomalia confirmada, mostra o modal de confirmação
-          if (data.type === "ALERT" && data.kind === "ANOMALY_CONFIRMED") {
-            setPendingAnomaly({
-              id: data.id,
-              kind: data.kind,
-              timestamp: data.timestamp,
-              score: data.score,
-              detections: data.detections || [],
-            });
-          }
-        } catch (err) {
-          console.error("Erro ao processar mensagem WebSocket:", err);
-        }
-      };
-      
-      ws.onerror = (error) => {
-        console.error("Erro WebSocket:", error);
-      };
-      
-      ws.onclose = () => {
-        console.log("WebSocket desconectado. Reconectando em 5s...");
-        setTimeout(connectWebSocket, 5000);
-      };
-      
-      wsRef.current = ws;
-    } catch (err) {
-      console.error("Erro ao conectar WebSocket:", err);
-    }
-  };
-
   const handleConfirmAnomaly = async (event, justification) => {
     try {
       if (!event.id) {
@@ -142,9 +89,10 @@ export default function CamerasPage() {
         decision: "confirmado",
         operator: user?.username || "operador",
         justification: justification,
-        event_id: event.id,  // ← Envia o ID do evento
+        event_id: event.id,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
-      console.log("Anomalia confirmada e salva no banco:", event.id);
     } catch (err) {
       console.error("Erro ao confirmar anomalia:", err);
       throw err;
@@ -161,9 +109,10 @@ export default function CamerasPage() {
         decision: "falso_positivo",
         operator: user?.username || "operador",
         justification: justification,
-        event_id: event.id,  // ← Envia o ID do evento
+        event_id: event.id,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
-      console.log("Anomalia marcada como falso positivo:", event.id);
     } catch (err) {
       console.error("Erro ao rejeitar anomalia:", err);
       throw err;
@@ -249,7 +198,6 @@ export default function CamerasPage() {
     }
   };
 
-  // Câmera está realmente ativa e capturando?
   const isCameraLive = Boolean(cameraStatus && cameraStatus.running);
 
   const friendlySource = (src) => {
@@ -262,7 +210,6 @@ export default function CamerasPage() {
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* Topo */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
         <div>
           <h1 style={{ fontSize: "22px", fontWeight: 600 }}>Câmeras do Sistema</h1>
@@ -298,7 +245,6 @@ export default function CamerasPage() {
         </div>
       </div>
 
-      {/* Mensagens de Feedback */}
       {msg.text && (
         <div
           style={{
@@ -334,23 +280,15 @@ export default function CamerasPage() {
         </div>
       )}
 
-      {/* Mosaico de Câmeras */}
       <div
         ref={gridContainerRef}
         style={{
           display: "grid",
-          gridTemplateColumns: (() => {
-            const totalCams = cameras.length + (isCameraLive ? 1 : 0);
-            if (totalCams === 0) return "1fr";
-            if (totalCams === 1) return "1fr";
-            if (totalCams === 2) return "repeat(2, 1fr)";
-            return "repeat(auto-fit, minmax(380px, 1fr))";
-          })(),
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(380px, 100%), 1fr))",
           gap: "16px",
           width: "100%",
         }}
       >
-        {/* Se não houver câmera conectada / rodando */}
         {!isCameraLive && cameras.length === 0 ? (
           <div
             className="card-panel"
@@ -373,7 +311,6 @@ export default function CamerasPage() {
           </div>
         ) : (
           <>
-            {/* Feed Ativo (Somente se cameraStatus.running for true) */}
             {isCameraLive && (
               <div
                 id="cam-card-live"
@@ -457,7 +394,6 @@ export default function CamerasPage() {
               </div>
             )}
 
-            {/* Outras Câmeras cadastradas pelo operador */}
             {cameras.map((cam) => {
               const isSameSource = cameraStatus && String(cameraStatus.source) === String(cam.source);
               if (isSameSource && isCameraLive) return null; // Já está exibida no feed ativo
@@ -549,7 +485,6 @@ export default function CamerasPage() {
         )}
       </div>
 
-      {/* Modal de Adicionar Câmera */}
       {showAddModal && (
         <div
           style={{
@@ -642,10 +577,12 @@ export default function CamerasPage() {
         </div>
       )}
 
-      {/* Pop-up de Alerta de Anomalia */}
       {pendingAnomaly && (
         <AnomalyAlert
           event={pendingAnomaly}
+          userId={user?.id}
+          userEmail={user?.email}
+          cameraName={cameras.find((c) => c.camera_uid === pendingAnomaly?.camera_uid)?.name}
           onConfirm={handleConfirmAnomaly}
           onReject={handleRejectAnomaly}
           onClose={() => setPendingAnomaly(null)}

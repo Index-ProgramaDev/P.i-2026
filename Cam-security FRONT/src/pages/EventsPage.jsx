@@ -3,14 +3,12 @@ import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 import {
   Play,
-  Image as ImageIcon,
   RefreshCw,
   X,
   CheckCircle,
   XCircle,
   AlertTriangle,
   Filter,
-  Download,
   Eye,
 } from "lucide-react";
 
@@ -49,7 +47,8 @@ export default function EventsPage() {
   const getEventStatus = (ev) => {
     if (!ev.metadata) return "pending";
     const meta = typeof ev.metadata === "string" ? JSON.parse(ev.metadata) : ev.metadata;
-    return meta.status || meta.last_decision || "pending";
+    const st = meta.status || meta.last_decision || "pending";
+    return st === "pendente" ? "pending" : st;
   };
 
   const filteredEvents = events.filter((ev) => {
@@ -69,6 +68,8 @@ export default function EventsPage() {
         decision: decision,
         operator: user?.username || "operador",
         justification: justification || (decision === "confirmado" ? "Confirmado" : "Falso positivo"),
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
       await fetchEvents();
       closeModal();
@@ -102,7 +103,6 @@ export default function EventsPage() {
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 600 }}>Central de Revisão</h1>
@@ -116,8 +116,7 @@ export default function EventsPage() {
         </button>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))", gap: "12px" }}>
         <div className="card-panel" style={{ padding: "16px" }}>
           <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
             AGUARDANDO REVISÃO
@@ -142,7 +141,6 @@ export default function EventsPage() {
         </div>
       </div>
 
-      {/* Filtros */}
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <button
           onClick={() => setFilter("all")}
@@ -167,11 +165,10 @@ export default function EventsPage() {
         </button>
       </div>
 
-      {/* Grid de Eventos */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fill, minmax(min(320px, 100%), 1fr))",
           gap: "16px",
         }}
       >
@@ -217,7 +214,6 @@ export default function EventsPage() {
                     : "1px solid var(--border-subtle)",
                 }}
               >
-                {/* Thumbnail */}
                 <div
                   style={{
                     width: "100%",
@@ -273,7 +269,6 @@ export default function EventsPage() {
                   )}
                 </div>
 
-                {/* Info */}
                 <div style={{ marginBottom: "12px" }}>
                   <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
                     {ev.event_id || `Evento #${ev.id}`}
@@ -286,7 +281,6 @@ export default function EventsPage() {
                   </div>
                 </div>
 
-                {/* Status Badge */}
                 <div style={{ marginBottom: "12px" }}>
                   <span
                     className={`badge ${
@@ -305,7 +299,6 @@ export default function EventsPage() {
                   </span>
                 </div>
 
-                {/* Ações */}
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                   {isPending && (
                     <button
@@ -330,7 +323,6 @@ export default function EventsPage() {
         )}
       </div>
 
-      {/* Modal de Revisão */}
       {modalType === "review" && selectedEvent && (
         <div
           style={{
@@ -353,8 +345,7 @@ export default function EventsPage() {
               </button>
             </div>
 
-            {/* Preview do Evento */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: "16px", marginBottom: "20px" }}>
               <div>
                 <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>Frame do Evento</div>
                 <img
@@ -387,7 +378,6 @@ export default function EventsPage() {
               </div>
             </div>
 
-            {/* Justificativa */}
             <div style={{ marginBottom: "20px" }}>
               <label style={{ fontSize: "12px", color: "var(--text-secondary)", display: "block", marginBottom: "8px" }}>
                 Observações / Justificativa (opcional):
@@ -412,7 +402,6 @@ export default function EventsPage() {
               />
             </div>
 
-            {/* Botões */}
             <div style={{ display: "flex", gap: "12px" }}>
               <button
                 onClick={() => handleReview("falso_positivo")}
@@ -442,7 +431,6 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* Modal de Vídeo */}
       {modalType === "video" && selectedEvent && (
         <div
           style={{
@@ -488,7 +476,6 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* Modal de Frame */}
       {modalType === "frame" && selectedEvent && (
         <div
           style={{

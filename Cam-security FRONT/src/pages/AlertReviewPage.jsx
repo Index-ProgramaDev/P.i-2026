@@ -1,22 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   ShieldAlert,
   ArrowLeft,
   CheckCircle,
   HelpCircle,
   XCircle,
-  Clock,
-  Camera,
   Play,
   Pause,
   Volume2,
   VolumeX,
   RotateCcw,
-  User,
-  AlertTriangle,
   History,
-  FileCheck2,
 } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
@@ -33,7 +28,6 @@ export default function AlertReviewPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionSuccess, setActionSuccess] = useState("");
 
-  // Estados do Player de Vídeo Operacional
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -46,15 +40,18 @@ export default function AlertReviewPage() {
     setError("");
     try {
       if (!eventId) {
-        // Se acessado sem ID, busca o último evento existente para revisão
-        const res = await api.getEvents({ limit: 1 });
+        const res = await api.getEvents({
+          limit: 1,
+          user_id: user?.id || null,
+          user_email: user?.email || null,
+        });
         if (res.items && res.items.length > 0) {
           setEventData(res.items[0]);
         } else {
           setError("Nenhum evento registrado disponível para revisão.");
         }
       } else {
-        const ev = await api.getEventById(eventId);
+        const ev = await api.getEventById(eventId, user?.id || null, user?.email || null);
         setEventData(ev);
       }
     } catch (err) {
@@ -85,6 +82,8 @@ export default function AlertReviewPage() {
         decision,
         operator: user?.username || "operador_central",
         justification: justification.trim(),
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
       setActionSuccess(`Decisão "${decision}" gravada com sucesso no histórico operacional!`);
       if (res.event) {
@@ -98,7 +97,6 @@ export default function AlertReviewPage() {
     }
   };
 
-  // Controles do Player
   const togglePlay = () => {
     if (videoRef.current) {
       if (isPlaying) {
@@ -125,11 +123,16 @@ export default function AlertReviewPage() {
     }
   };
 
-  // Parsing de detecções e dados de tracking
   let detections = [];
   try {
-    if (typeof eventData?.detections === "string" && eventData.detections) {
-      detections = JSON.parse(eventData.detections);
+    const metaDet = typeof eventData?.metadata === "string"
+      ? JSON.parse(eventData.metadata || "{}").detections
+      : eventData?.metadata?.detections;
+    if (Array.isArray(metaDet) && metaDet.length > 0) {
+      detections = metaDet;
+    } else if (typeof eventData?.detections === "string" && eventData.detections) {
+      const parsed = JSON.parse(eventData.detections);
+      detections = Array.isArray(parsed) ? parsed : [];
     } else if (Array.isArray(eventData?.detections)) {
       detections = eventData.detections;
     }
@@ -142,14 +145,18 @@ export default function AlertReviewPage() {
       ? JSON.parse(eventData.metadata || "{}")
       : eventData?.metadata || {};
 
-  const currentStatus = meta.status || "pendente";
+  const currentStatus = (meta.status === "pending" ? "pendente" : meta.status) || "pendente";
   const reviewHistory = meta.review_history || [];
   const ucfScore = eventData?.ucf_score !== null && eventData?.ucf_score !== undefined
     ? (eventData.ucf_score * 100).toFixed(1)
     : "N/A";
 
-  const videoUrl = eventData ? api.getEventVideoUrl(eventData.event_id || eventData.id) : null;
-  const frameUrl = eventData ? api.getEventFrameUrl(eventData.event_id || eventData.id) : null;
+  const videoUrl = eventData
+    ? api.getEventVideoUrl(eventData.event_id || eventData.id, user?.id || null, user?.email || null)
+    : null;
+  const frameUrl = eventData
+    ? api.getEventFrameUrl(eventData.event_id || eventData.id, user?.id || null, user?.email || null)
+    : null;
 
   if (loading) {
     return (
@@ -176,7 +183,6 @@ export default function AlertReviewPage() {
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* Topo / Voltar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <button
@@ -233,15 +239,13 @@ export default function AlertReviewPage() {
         </div>
       )}
 
-      {/* Grid Principal: Player & Detalhes */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(460px, 100%), 1fr))",
           gap: "18px",
         }}
       >
-        {/* Lado Esquerdo: Player de Vídeo e Bounding Boxes Dinâmicas */}
         <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: "13px", fontWeight: 600 }}>Evidência em Vídeo (MP4 / Frame)</span>
@@ -250,7 +254,6 @@ export default function AlertReviewPage() {
             </span>
           </div>
 
-          {/* Área do Player com Bounding Box vermelha sobreposta de tracking real */}
           <div
             style={{
               position: "relative",
@@ -289,7 +292,6 @@ export default function AlertReviewPage() {
               />
             )}
 
-            {/* Bounding box de tracking real com coordenadas acompanhadas do backend */}
             {detections.map((det, idx) => {
               if (!det.box || det.box.length < 4) return null;
               // Assumindo normalização 0-1 ou resolução 640x480
@@ -336,7 +338,6 @@ export default function AlertReviewPage() {
             })}
           </div>
 
-          {/* Timeline e Controles Operacionais do Player */}
           <div
             style={{
               display: "flex",
@@ -407,13 +408,11 @@ export default function AlertReviewPage() {
           </div>
         </div>
 
-        {/* Lado Direito: Metadados, Ações e Histórico de Decisões */}
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Metadados Operacionais */}
           <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <h2 style={{ fontSize: "15px", fontWeight: 600 }}>Parâmetros da Ocorrência</h2>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(180px, 100%), 1fr))", gap: "10px", fontSize: "13px" }}>
               <div>
                 <span style={{ color: "var(--text-secondary)", fontSize: "11px" }}>ID DO EVENTO</span>
                 <div style={{ fontWeight: 600, color: "var(--text-main)" }}>
@@ -458,7 +457,6 @@ export default function AlertReviewPage() {
             </div>
           </div>
 
-          {/* Três Ações Operacionais Obrigatórias */}
           <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <h2 style={{ fontSize: "15px", fontWeight: 600 }}>Decisão Operacional</h2>
 
@@ -476,7 +474,7 @@ export default function AlertReviewPage() {
               />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(130px, 100%), 1fr))", gap: "8px" }}>
               <button
                 type="button"
                 onClick={() => handleDecision("confirmado")}
@@ -512,7 +510,6 @@ export default function AlertReviewPage() {
             </div>
           </div>
 
-          {/* Histórico de Decisões */}
           <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <History size={16} color="var(--text-secondary)" />

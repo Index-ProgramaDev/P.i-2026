@@ -5,8 +5,6 @@ import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { AuthToast, Field, TacticalPanel, delay } from "../components/AuthShell";
 
-const STORAGE_KEY = "camsec_user";
-
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -26,12 +24,6 @@ export default function LoginPage() {
 
   const notify = (type, message) => setToast({ type, message });
 
-  const persistUser = (user) => {
-    const [keep, drop] = keepLogged ? [localStorage, sessionStorage] : [sessionStorage, localStorage];
-    keep.setItem(STORAGE_KEY, JSON.stringify(user));
-    drop.removeItem(STORAGE_KEY);
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setToast(null);
@@ -46,8 +38,7 @@ export default function LoginPage() {
       if (!res?.success || !res.user) {
         return notify("error", res?.detail || "Credenciais inválidas. Verifique seu usuário e senha.");
       }
-      login(res.user);
-      persistUser(res.user);
+      login(res.user, res.token, keepLogged);
       notify("success", "Credenciais validadas. Redirecionando para o painel...");
       setTimeout(() => navigate("/dashboard"), 900);
     } catch (err) {

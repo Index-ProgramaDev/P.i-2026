@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Camera,
@@ -11,6 +11,7 @@ import {
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 import AnomalyAlert from "../components/AnomalyAlert";
+import { useAlertSocket } from "../hooks/useAlertSocket";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -22,7 +23,12 @@ export default function DashboardPage() {
   const [events, setEvents] = useState([]);
   const [recentAlerts, setRecentAlerts] = useState([]);
   const [pendingAnomaly, setPendingAnomaly] = useState(null);
-  const wsRef = useRef(null);
+
+  useAlertSocket({
+    user,
+    onAnomaly: (a) => setPendingAnomaly(a),
+    onAlert: () => loadDashboardData(),
+  });
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -37,7 +43,11 @@ export default function DashboardPage() {
       }
       setCameras(userCams);
 
-      const eventsRes = await api.getEvents({ limit: 200 }).catch(() => ({ total: 0, items: [] }));
+      const eventsRes = await api.getEvents({
+        limit: 200,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
+      }).catch(() => ({ total: 0, items: [] }));
       const items = eventsRes.items || [];
       setEvents(items);
 
@@ -53,73 +63,19 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboardData();
     const interval = setInterval(loadDashboardData, 10000);
-    
-    // Conecta WebSocket para alertas em tempo real
-    connectWebSocket();
-    
-    return () => {
-      clearInterval(interval);
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
+    return () => clearInterval(interval);
   }, [user]);
-
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket(api.wsUrl);
-      
-      ws.onopen = () => {
-        console.log("WebSocket conectado para alertas");
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Se for anomalia confirmada, mostra o modal de confirmação
-          if (data.type === "ALERT" && data.kind === "ANOMALY_CONFIRMED") {
-            setPendingAnomaly({
-              kind: data.kind,
-              timestamp: data.timestamp,
-              score: data.score,
-              detections: data.detections || [],
-            });
-          }
-          
-          // Atualiza lista de eventos
-          if (data.type === "ALERT") {
-            loadDashboardData();
-          }
-        } catch (err) {
-          console.error("Erro ao processar mensagem WebSocket:", err);
-        }
-      };
-      
-      ws.onerror = (error) => {
-        console.error("Erro WebSocket:", error);
-      };
-      
-      ws.onclose = () => {
-        console.log("WebSocket desconectado. Reconectando em 5s...");
-        setTimeout(connectWebSocket, 5000);
-      };
-      
-      wsRef.current = ws;
-    } catch (err) {
-      console.error("Erro ao conectar WebSocket:", err);
-    }
-  };
 
   const handleConfirmAnomaly = async (event, justification) => {
     try {
-      // Usa o novo endpoint que salva apenas quando confirmado
       await api.confirmAnomalyFromOperator({
         decision: "confirmado",
         operator: user?.username || "operador",
         justification: justification,
+        event_id: event?.id || event?.event_id,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
-      console.log("Anomalia confirmada e salva no banco");
     } catch (err) {
       console.error("Erro ao confirmar anomalia:", err);
       throw err;
@@ -128,13 +84,14 @@ export default function DashboardPage() {
 
   const handleRejectAnomaly = async (event, justification) => {
     try {
-      // Marca como falso positivo sem salvar evidências
       await api.confirmAnomalyFromOperator({
         decision: "falso_positivo",
         operator: user?.username || "operador",
         justification: justification,
+        event_id: event?.id || event?.event_id,
+        user_id: user?.id || null,
+        user_email: user?.email || null,
       });
-      console.log("Anomalia marcada como falso positivo");
     } catch (err) {
       console.error("Erro ao rejeitar anomalia:", err);
       throw err;
@@ -144,7 +101,6 @@ export default function DashboardPage() {
   const isCamRunning = Boolean(cameraStatus && cameraStatus.running);
   const activeCamerasCount = isCamRunning ? (cameras.length > 0 ? cameras.length : 1) : 0;
 
-  // Converte caminho técnico da fonte (ex: ./video/Vandalismo.mp4) em nome amigável
   const friendlySourceName = (source) => {
     if (!source) return "Câmera sem fonte";
     const match = cameras.find((c) => c.source === source || c.camera_uid === source);
@@ -155,11 +111,10 @@ export default function DashboardPage() {
   };
   const pendingAlertsCount = events.filter((e) => {
     const meta = typeof e.metadata === "string" ? JSON.parse(e.metadata || "{}") : (e.metadata || {});
-    return !meta.status || meta.status === "pendente";
+    return !meta.status || meta.status === "pendente" || meta.status === "pending";
   }).length;
   const totalEventsCount = events.length;
 
-  // ---- Dados para gráficos de ocorrências ----
   const dayBuckets = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
@@ -191,7 +146,6 @@ export default function DashboardPage() {
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* Topo */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 600, color: "var(--text-main)" }}>
@@ -208,11 +162,10 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Cards de Indicadores */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
           gap: "16px",
         }}
       >
@@ -265,7 +218,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Gráficos de Ocorrências */}
       <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
           <div>
@@ -307,11 +259,10 @@ export default function DashboardPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))",
               gap: "24px",
             }}
           >
-            {/* Barras — últimos 7 dias */}
             <div>
               <p
                 style={{
@@ -357,7 +308,6 @@ export default function DashboardPage() {
               </svg>
             </div>
 
-            {/* Barras horizontais — por tipo */}
             <div>
               <p
                 style={{
@@ -427,15 +377,13 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Grid Principal: Alertas Recentes & Câmeras */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(400px, 100%), 1fr))",
           gap: "16px",
         }}
       >
-        {/* Alertas Recentes */}
         <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h2 style={{ fontSize: "15px", fontWeight: 600 }}>Alertas Recentes</h2>
@@ -505,7 +453,7 @@ export default function DashboardPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               {recentAlerts.slice(0, 5).map((al) => {
                 const meta = typeof al.metadata === "string" ? JSON.parse(al.metadata || "{}") : (al.metadata || {});
-                const status = meta.status || "pendente";
+                const status = meta.status === "pending" ? "pendente" : (meta.status || "pendente");
 
                 return (
                   <div
@@ -541,7 +489,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Câmeras Conectadas */}
         <div className="card-panel" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h2 style={{ fontSize: "15px", fontWeight: 600 }}>Câmeras do Sistema</h2>
@@ -656,10 +603,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Modal de Alerta de Anomalia */}
       {pendingAnomaly && (
         <AnomalyAlert
           event={pendingAnomaly}
+          userId={user?.id}
+          userEmail={user?.email}
+          cameraName={cameras.find((c) => c.camera_uid === pendingAnomaly?.camera_uid)?.name}
           onConfirm={handleConfirmAnomaly}
           onReject={handleRejectAnomaly}
           onClose={() => setPendingAnomaly(null)}

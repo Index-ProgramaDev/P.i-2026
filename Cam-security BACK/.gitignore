@@ -35,3 +35,6 @@ Thumbs.db
 
 # Pytest
 .pytest_cache/
+.env
+
+.jwt_secret

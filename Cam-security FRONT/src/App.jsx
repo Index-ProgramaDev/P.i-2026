@@ -10,7 +10,6 @@ import AlertsPage from "./pages/AlertsPage";
 import CamerasPage from "./pages/CamerasPage";
 import EventsPage from "./pages/EventsPage";
 
-// Componente de Rota Protegida Obrigatória
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   if (!user) {
@@ -24,12 +23,10 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Rotas Públicas de Autenticação */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/auth" element={<Navigate to="/login" replace />} />
 
-          {/* Rotas 100% Protegidas - Bloqueadas sem conta */}
           <Route
             path="/"
             element={
